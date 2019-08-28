@@ -42,7 +42,7 @@ I would like to put a thanks out to a lot of other similar libraries for giving 
 Resultant stats running the given shell file:
 
 | Test        | User Time | System Time  | Total |
-| ------------- |-------------| -----|
+| ------------- |-------------| -----|-------|
 | Python (os.walk) | 0.121s | 0.063s | 0.184s |
 | CPath (Recursion) | 0.12s | 0.031s | 0.043s |
 | CPath (Stack) | 0.13s | 0.035s | 0.048s |
