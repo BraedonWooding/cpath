@@ -25,6 +25,10 @@ SOFTWARE.
 #ifndef CPATH_H
 #define CPATH_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
   Note this library also works with C++ via a C++ provided binding
   which is available for free just by including this on a C++ compiler
@@ -99,8 +103,6 @@ SOFTWARE.
 #define _CPATH_FUNC_ static __inline__
 #else
 #define _CPATH_FUNC_ static inline
-#endif
-
 #endif
 
 /* == #includes == */
@@ -1403,3 +1405,8 @@ const cpath_char_t *cpathGetFileSizePrefix(cpath_file *file, CPathByteRep rep) {
     default: return NULL;
   }
 }
+
+#endif
+#ifdef __cplusplus
+}
+#endif
