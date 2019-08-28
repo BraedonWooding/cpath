@@ -33,7 +33,7 @@ void recursive_visit(cpath_dir *dir, int tab) {
         for (int i = 0; i < tab; i++) putchar('\t');
         CPathByteRep flags = BYTE_REP_JEDEC | BYTE_REP_BYTE_WORD;
         printf("[%c] %s %.1lf %s\n", (file.isDir ? 'D' : 'F'), file.name,
-            cpathGetFileSizeDec(&file, 1000), cpathGetFileSizePrefix(&file, flags));
+            cpathGetFileSizeDec(&file, 1024), cpathGetFileSizePrefix(&file, flags));
         if (file.isDir && !cpathFileIsSpecialHardLink(&file)) {
             cpath_dir tmp;
             cpathFileToDir(&tmp, &file);
@@ -56,7 +56,7 @@ void emplace(cpath_dir *dir) {
             for (int i = 0; i < tab; i++) putchar('\t');
             CPathByteRep flags = BYTE_REP_JEDEC | BYTE_REP_BYTE_WORD;
             printf("[%c] %s %.1lf %s\n", (file.isDir ? 'D' : 'F'), file.name,
-                cpathGetFileSizeDec(&file, 1000), cpathGetFileSizePrefix(&file, flags));
+                cpathGetFileSizeDec(&file, 1024), cpathGetFileSizePrefix(&file, flags));
             if (file.isDir && !cpathFileIsSpecialHardLink(&file)) {
                 cpathOpenSubFileEmplace(dir, &file, 1);
                 tab++;

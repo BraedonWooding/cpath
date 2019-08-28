@@ -873,50 +873,61 @@ int cpathLoadFlags(cpath_dir *dir, cpath_file *file, void *data) {
 }
 
 _CPATH_FUNC_
+int cpathPeekNextFile(cpath_dir *dir, cpath_file *file) {
+  if (file == NULL || dir == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+
+  file->statLoaded = 0;
+  // load current file into file
+  const cpath_char_t *filename;
+  size_t filenameLen;
+#if defined _MSC_VER
+  if (dir->handle == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  filename = dir->fileData.cFileName;
+  filenameLen = cpath_str_length(filename);
+#else
+  if (dir->dirent == NULL) {
+    return 0;
+  }
+  filename = dir->dirent->d_name;
+  filenameLen = dir->dirent->d_namlen;
+#endif
+  size_t totalLen = dir->path.len + filenameLen;
+  if (totalLen + 1 + CPATH_PATH_EXTRA_CHARS >= CPATH_MAX_PATH_LEN ||
+      filenameLen >= CPATH_MAX_FILENAME_LEN) {
+    errno = ENAMETOOLONG;
+    return 0;
+  }
+
+  cpath_str_copy(file->name, filename);
+  cpathCopy(&file->path, &dir->path);
+  CPATH_CONCAT_LIT(&file->path, "/");
+  cpathConcatStr(&file->path, filename);
+  cpathGetExtension(file);
+#if defined _MSC_VER
+  cpathLoadFlags(dir, file, dir->fileData)
+#else
+  cpathLoadFlags(dir, file, NULL);
+#endif
+  return 1;
+}
+
+_CPATH_FUNC_
 int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
   if (file != NULL) {
-    file->statLoaded = 0;
-    // load current file into file
-    const cpath_char_t *filename;
-    size_t filenameLen;
-#if defined _MSC_VER
-    if (dir->handle == INVALID_HANDLE_VALUE) {
+    if (!cpathPeekNextFile(dir, file)) {
       return 0;
     }
-    filename = dir->fileData.cFileName;
-    filenameLen = cpath_str_length(filename);
-#else
-    if (dir->dirent == NULL) {
-      return 0;
-    }
-    filename = dir->dirent->d_name;
-    filenameLen = dir->dirent->d_namlen;
-#endif
-    size_t totalLen = dir->path.len + filenameLen;
-    if (totalLen + 1 + CPATH_PATH_EXTRA_CHARS >= CPATH_MAX_PATH_LEN ||
-        filenameLen >= CPATH_MAX_FILENAME_LEN) {
-      errno = ENAMETOOLONG;
-      return 0;
-    }
-
-    cpath_str_copy(file->name, filename);
-    cpathCopy(&file->path, &dir->path);
-    CPATH_CONCAT_LIT(&file->path, "/");
-    cpathConcatStr(&file->path, filename);
-    cpathGetExtension(file);
-
-#if defined _MSC_VER
-    cpathLoadFlags(dir, file, dir->fileData)
-#else
-    cpathLoadFlags(dir, file, NULL);
-#endif
   }
 
   errno = 0;
   if (dir->hasNext && !cpathMoveNextFile(dir) && errno != 0) {
     return 0;
   }
-
   return 1;
 }
 
@@ -1075,7 +1086,8 @@ int cpathOpenSubDirEmplace(cpath_dir *dir, size_t n, int saveDir) {
 
   const cpath_file *file;
   if (!cpathGetFileConst(dir, &file, n) ||
-      !cpathOpenSubFileEmplace(dir, file, saveDir)) {
+      !file->isDir || !cpathOpenSubFileEmplace(dir, file, saveDir)) {
+    if (!file->isDir) errno = EINVAL;
     return 0;
   }
 
@@ -1083,13 +1095,85 @@ int cpathOpenSubDirEmplace(cpath_dir *dir, size_t n, int saveDir) {
 }
 
 _CPATH_FUNC_
-int cpathOpenSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
+int cpathOpenSubDir(cpath_dir *out, cpath_dir *dir, size_t n) {
+  if (dir == NULL || out == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+  if (!cpathCheckGetN(dir, n)) return 0;
+
+  const cpath_file *file;
+  if (!cpathGetFileConst(dir, &file, n) ||
+      !file->isDir || !cpathFileToDir(out, file)) {
+    if (!file->isDir) errno = EINVAL;
+    return 0;
+  }
+  return 1;
+}
 
 _CPATH_FUNC_
-int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir);
+int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir) {
+  if (dir == NULL || out == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+
+  cpath_file file;
+  if (!cpathGetNextFile(dir, &file) ||
+      !file.isDir || !cpathFileToDir(out, &file)) {
+    if (!file.isDir) errno = EINVAL;
+    return 0;
+  }
+  return 1;
+}
 
 _CPATH_FUNC_
-int cpathOpenNextSubDirEmplace(cpath_dir *dir, int saveDir);
+int cpathOpenCurrentSubDir(cpath_dir *out, cpath_dir *dir) {
+  if (dir == NULL || out == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+
+  cpath_file file;
+  if (!cpathPeekNextFile(dir, &file) ||
+      !file.isDir || !cpathFileToDir(out, &file)) {
+    if (!file.isDir) errno = EINVAL;
+    return 0;
+  }
+  return 1;
+}
+
+_CPATH_FUNC_
+int cpathOpenNextSubDirEmplace(cpath_dir *dir, int saveDir) {
+  if (dir == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+
+  cpath_file file;
+  if (!cpathGetNextFile(dir, &file) ||
+      !file.isDir || !cpathOpenSubFileEmplace(dir, &file, saveDir)) {
+    if (!file.isDir) errno = EINVAL;
+    return 0;
+  }
+  return 1;
+}
+
+_CPATH_FUNC_
+int cpathOpenCurrentSubDirEmplace(cpath_dir *dir, int saveDir) {
+  if (dir == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+
+  cpath_file file;
+  if (!cpathPeekNextFile(dir, &file) ||
+      !file.isDir || !cpathOpenSubFileEmplace(dir, &file, saveDir)) {
+    if (!file.isDir) errno = EINVAL;
+    return 0;
+  }
+  return 1;
+}
 
 _CPATH_FUNC_
 int cpathRevertEmplace(cpath_dir **dir) {
