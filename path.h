@@ -75,8 +75,8 @@ SOFTWARE.
 #if !defined CPATH_MALLOC && !defined CPATH_FREE
 #define CPATH_MALLOC(size) malloc(size)
 #define CPATH_FREE(ptr) free(ptr)
-#elif (defined CPATH_MALLOC && !defined SIMPLED_DIR_FREE) || \
-      (defined SIMPLED_DIR_FREE && !defined CPATH_MALLOC)
+#elif (defined CPATH_MALLOC && !defined CPATH_FREE) || \
+      (defined CPATH_FREE && !defined CPATH_MALLOC)
 #error "Can't define only free or only malloc have to define both or neither"
 #endif
 
@@ -285,6 +285,8 @@ typedef struct cpath_file_t {
 #endif
 #endif
 
+  int statLoaded;
+
   cpath path;
   cpath_char_t name[CPATH_MAX_FILENAME_LEN];
   cpath_str extension;
@@ -485,7 +487,7 @@ void cpathSort(cpath_dir *dir, cpath_cmp cmp);
   Is this file either `.` or `..`
 */
 _CPATH_FUNC_
-int cpathFileIsSpecialHardLink(cpath_file *file);
+int cpathFileIsSpecialHardLink(const cpath_file *file);
 
 /*
   Get the time of last access
@@ -805,7 +807,10 @@ int cpathMoveNextFile(cpath_dir *dir) {
 }
 
 _CPATH_FUNC_
-int cpathGetFileInfo(cpath_file *file, void *data) {
+int cpathGetFileInfo(cpath_file *file) {
+  if (file->statLoaded) {
+    return 1;
+  }
 #if !defined _MSC_VER
 #if defined __MINGW32__
   if (_tstat(file->path.buf, &file->stat) == -1) {
@@ -823,7 +828,12 @@ int cpathGetFileInfo(cpath_file *file, void *data) {
   }
 #endif
 #endif
+  file->statLoaded = 1;
+  return 1;
+}
 
+_CPATH_FUNC_
+int cpathLoadFlags(cpath_dir *dir, cpath_file *file, void *data) {
 #if defined _MSC_VER
   WIN32_FIND_DATA *find = (WIN32_FIND_DATA*) data;
   file->isDir = FILE_IS(find, DIRECTORY);
@@ -837,16 +847,27 @@ int cpathGetFileInfo(cpath_file *file, void *data) {
 #ifdef FILE_ATTRIBUTE_NO_SCRUB_DATA
              FILE_IS_NOT(find, NO_SCRUB_DATA) &&
 #endif
-              FILE_IS_NOT(find, TEMPORARY)) {
+             FILE_IS_NOT(find, TEMPORARY)) {
     file->isReg = 1;
   } else {
     file->isReg = 0;
   }
   file->isSym = FILE_IS(find, REPARSE_POINT);
 #else
-  file->isDir = S_ISDIR(file->stat.st_mode);
-  file->isReg = S_ISREG(file->stat.st_mode);
-  file->isSym = S_ISLNK(file->stat.st_mode);
+  if (dir->dirent == NULL || dir->dirent->d_type == DT_UNKNOWN) {
+    if (!cpathGetFileInfo(file)) {
+      return 0;
+    }
+
+    file->isDir = S_ISDIR(file->stat.st_mode);
+    file->isReg = S_ISREG(file->stat.st_mode);
+    file->isSym = S_ISLNK(file->stat.st_mode);
+  } else {
+    file->isDir = dir->dirent->d_type == DT_DIR;
+    file->isReg = dir->dirent->d_type == DT_REG;
+    file->isSym = dir->dirent->d_type == DT_LNK;
+    file->statLoaded = 0;
+  }
 #endif
   return 1;
 }
@@ -854,6 +875,7 @@ int cpathGetFileInfo(cpath_file *file, void *data) {
 _CPATH_FUNC_
 int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
   if (file != NULL) {
+    file->statLoaded = 0;
     // load current file into file
     const cpath_char_t *filename;
     size_t filenameLen;
@@ -882,14 +904,12 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
     CPATH_CONCAT_LIT(&file->path, "/");
     cpathConcatStr(&file->path, filename);
     cpathGetExtension(file);
-    void *data = NULL;
-#if defined _MSC_VER
-    data = dir->findData;
-#endif
 
-    if (!cpathGetFileInfo(file, data)) {
-      return 0;
-    }
+#if defined _MSC_VER
+    cpathLoadFlags(dir, file, dir->fileData)
+#else
+    cpathLoadFlags(dir, file, NULL);
+#endif
   }
 
   errno = 0;
@@ -901,8 +921,9 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
 }
 
 _CPATH_FUNC_
-int cpathFileIsSpecialHardLink(cpath_file *file) {
-  return !strcmp(file->name, "..") || !strcmp(file->name, ".");
+int cpathFileIsSpecialHardLink(const cpath_file *file) {
+  return (file->name[0] == '.' && (file->name[1] == '\0' ||
+         (file->name[1] == '.' && file->name[2] == '\0')));
 }
 
 _CPATH_FUNC_
@@ -1109,7 +1130,7 @@ int cpathOpenFile(cpath_file *file, const cpath *path) {
     return 0;
   }
 
-  void *data = NULL;
+  void *data;
   void *handle = NULL;
 
   cpathCopy(&file->path, path);
@@ -1144,8 +1165,9 @@ int cpathOpenFile(cpath_file *file, const cpath *path) {
   }
   // @TODO: make sure tmp isn't too long
 #endif
-
-  int res = cpathGetFileInfo(file, data);
+  dir.dirent = NULL;
+  file->statLoaded = 0;
+  int res = cpathLoadFlags(&dir, file, data);
 #if defined _MSC_VER
   FindClose((HANDLE)handle);
 #endif
@@ -1179,6 +1201,8 @@ cpath_str cpathGetExtension(cpath_file *file) {
 
 _CPATH_FUNC_
 cpath_time_t cpathGetLastAccess(cpath_file *file) {
+  if (!file->statLoaded) cpathGetFileInfo(file);
+
 #if defined _MSC_VER || defined __MINGW32__
   // Idk todo
 #else
@@ -1188,6 +1212,8 @@ cpath_time_t cpathGetLastAccess(cpath_file *file) {
 
 _CPATH_FUNC_
 cpath_time_t cpathGetLastModification(cpath_file *file) {
+  if (!file->statLoaded) cpathGetFileInfo(file);
+
 #if defined _MSC_VER || defined __MINGW32__
   // Idk todo
 #else
@@ -1197,6 +1223,8 @@ cpath_time_t cpathGetLastModification(cpath_file *file) {
 
 _CPATH_FUNC_
 cpath_offset_t cpathGetFileSize(cpath_file *file) {
+  if (!file->statLoaded) cpathGetFileInfo(file);
+
 #if defined _MSC_VER || defined __MINGW32__
   // Idk todo
 #else

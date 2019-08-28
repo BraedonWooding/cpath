@@ -26,3 +26,27 @@ I chose to make this very young i.e. C89/C99 ish since I was already going quite
 ## Credits
 
 I would like to put a thanks out to a lot of other similar libraries for giving me some source to compare against to make sure I was using the APIs correctly and some ideas for how to structure my API.
+
+## Benchmarks
+
+> Model Name: MacBook Air
+> Model Identifier: MacBookAir7,2
+> Processor Name: Intel Core i5
+> Processor Speed: 1.6 GHz
+> Number of Processors: 1
+> Total Number of Cores: 2
+> L2 Cache (per Core): 256 KB
+> L3 Cache: 3 MB
+> Memory: 8 GB
+
+Resultant stats running the given shell file:
+
+| Test        | User Time | System Time  | Total |
+| ------------- |-------------| -----|
+| Python (os.walk) | 0.121s | 0.063s | 0.184s |
+| CPath (Recursion) | 0.12s | 0.031s | 0.043s |
+| CPath (Stack) | 0.13s | 0.035s | 0.048s |
+| `tree` | 0.183s | 0.139s | 0.322s |
+| `find` | 0.013s | 0.058s | 0.071s |
+
+And yes this shows that CPath is faster than `find` :O.  Note all code is compiled on highest optimisation (`-O3`) but not on undefined optimisation (`-Ofast`)

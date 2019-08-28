@@ -96,12 +96,9 @@ int main(void) {
     cpath_dir dir;
     cpath path = cpathGetCwd();
     cpathOpenDir(&dir, &path);
-    // recursive_visit(&dir, 0);
-    // paths_example();
-
+    recursive_visit(&dir, 0);
+    paths_example();
     emplace(&dir);
-
-    return 0;
 
     cpath_file file;
     CPATH_CONCAT_LIT(&path, "a.out");
