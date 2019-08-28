@@ -37,6 +37,34 @@ SOFTWARE.
 */
 
 /*
+  Note on why this library offers no guarantees on reentrant systems
+  or no TOUTOC (and other race conditions):
+  - Often supporting this requires breaking a ton of compatability
+    and often the behaviour of each of the individual commands differs way
+    too much to make it consistent.  Even when fully following it we can't
+    guarantee that you won't just misuse it and still cause the race conditions
+  - The majority (99%) of cases simply just don't care about it how often
+    are your files being written over...
+  - We have extra safety on things like opening directories and recursive
+    solutions to make sure that things like that don't happen.
+  - How do you want to handle it properly?  You may want to just keep going
+    or you may want some way to unwind what you previously did, or just take
+    a snapshot of the system... It is too varied for us to offer a generalised
+    way.
+  - The majority of libraries don't offer it or they offer it to an extremely
+    limited number of commands with the others not having it, in my opinion
+    this is worse than just not offering it.  Atleast we are consistent with
+    our guarantees
+  - File Systems are a mess and already are basically a gigantic global mess
+    trying to guarantee any sort of safety is not only a complexity mess but
+    also can give the wrong idea.
+  - You should be able to detect hard failures due to the change in a folder
+    and simply just re-call.  Of course this could happen repeatedly but
+    come on... In reality it will occur once in a blue moon.
+  - Reloading files is easy it is just `cpathLoadFiles`
+*/
+
+/*
   @TODO:
   - Windows has lifted their max path so we could use the new functions
     I don't think all functions have an alternative and it could be more messy
@@ -126,6 +154,7 @@ typedef TCHAR cpath_char_t;
 #define CPATH_STR(str) _TEXT(str)
 #define cpath_str_length _tcslen
 #define cpath_str_copy _tcscpy
+#define cpath_strn_copy _tcsncpy
 #define cpath_str_concat _tcscat
 #define cpath_str_find_last_char _tcsrchr
 #define cpath_str_compare _tcsncmp
@@ -136,6 +165,7 @@ typedef char cpath_char_t;
 #define CPATH_STR(str) str
 #define cpath_str_length strlen
 #define cpath_str_copy strcpy
+#define cpath_strn_copy strncpy
 #define cpath_str_concat strcat
 #define cpath_str_find_last_char strrchr
 #define cpath_str_compare strncmp
@@ -237,6 +267,10 @@ typedef struct dirent cpath_dirent_t;
 
 typedef cpath_char_t *cpath_str;
 typedef int(*cpath_cmp)(const void*, const void*);
+typedef struct cpath_t {
+  cpath_char_t buf[CPATH_MAX_PATH_LEN];
+  size_t len;
+} cpath;
 
 typedef struct cpath_file_t {
   int isDir;
@@ -251,7 +285,7 @@ typedef struct cpath_file_t {
 #endif
 #endif
 
-  cpath_char_t path[CPATH_MAX_PATH_LEN];
+  cpath path;
   cpath_char_t name[CPATH_MAX_FILENAME_LEN];
   cpath_str extension;
 } cpath_file;
@@ -274,8 +308,7 @@ typedef struct cpath_dir_t {
 
   int hasNext;
 
-  cpath_char_t path[CPATH_MAX_PATH_LEN];
-  size_t pathLen;
+  cpath path;
 } cpath_dir;
 
 typedef int CPathByteRep;
@@ -294,6 +327,12 @@ enum {
 
 /* == Declarations == */
 
+/* == Path == */
+
+
+
+/* == File System == */
+
 /*
   Get the current working directory allocating the space
 */
@@ -310,13 +349,14 @@ cpath_char_t *cpathGetCwdBuf(cpath_char_t *buf, size_t size);
   Opens a directory placing information into the given directory buffer.
 */
 _CPATH_FUNC_
-int cpathOpenDir(cpath_dir *dir, const cpath_char_t *path);
+int cpathOpenDir(cpath_dir *dir, const cpath *path);
 
 /*
   Clear directory data.
+  If closing parents then will recurse through all previous emplaces.
 */
 _CPATH_FUNC_
-void cpathCloseDir(cpath_dir *dir);
+void cpathCloseDir(cpath_dir *dir, int closeParents);
 
 /*
   Get the next file inside the directory, acts like an iterator.
@@ -477,6 +517,102 @@ double cpathGetFileSizeDec(cpath_file *file, int interval);
 
 /* == Definitions == */
 
+/* == Path == */
+
+_CPATH_FUNC_
+void cpathTrim(cpath *path) {
+  // trim all the terminating `/` and `\`
+  while (path->buf[path->len - 1] == CPATH_STR('/') ||
+         path->buf[path->len - 1] == CPATH_STR('\\')) {
+    path->buf[path->len - 1] = '\0';
+    path->len--;
+  }
+}
+
+_CPATH_FUNC_
+cpath cpathFromUtf8(const char *str) {
+  cpath path;
+  path.len = 0;
+  path.buf[0] = '\0';
+  size_t len = cpath_str_length(str);
+  // NOTE: max path len includes the `\0` where as str length doesn't!
+  if (len >= CPATH_MAX_PATH_LEN) {
+    errno = ENAMETOOLONG;
+    return path;
+  }
+#if defined CPATH_UNICODE && defined _MSC_VER
+  mbstowcs_s(&path.len, path.buf, len + 1, str, CPATH_MAX_PATH_LEN);
+#else
+  // this is slightly cheaper since it won't keep going till the end of buffer
+  cpath_strn_copy(path.buf, str, len);
+#endif
+  path.len = len;
+  cpathTrim(&path);
+  return path;
+}
+
+_CPATH_FUNC_
+void cpathCopy(cpath *out, const cpath *in) {
+  cpath_str_copy(out->buf, in->buf);
+  out->len = in->len;
+}
+
+#define CPATH_CONCAT_LIT(path, other) cpathConcatStr(path, CPATH_STR(other))
+
+_CPATH_FUNC_
+int cpathConcatStrn(cpath *out, const cpath_char_t *other, size_t len) {
+  if (len + out->len >= CPATH_MAX_PATH_LEN) {
+    // path too long, >= cause max path includes '\0'
+    errno = ENAMETOOLONG;
+    return 0;
+  }
+
+  if (other[0] != CPATH_STR('/') && out->buf[out->len - 1] != CPATH_STR('/')) {
+    out->buf[out->len++] = '/';
+    out->buf[out->len] = '\0';
+  }
+
+  cpath_str_concat(out->buf, other);
+  out->len += len;
+  cpathTrim(out);
+  return 1;
+}
+
+_CPATH_FUNC_
+int cpathConcatStr(cpath *out, const cpath_char_t *other) {
+  return cpathConcatStrn(out, other, cpath_str_length(other));
+}
+
+_CPATH_FUNC_
+int cpathConcat(cpath *out, const cpath *other) {
+  return cpathConcatStrn(out, other->buf, other->len);
+}
+
+_CPATH_FUNC_
+int cpathExists(const cpath *path) {
+#if defined _MSC_VER || defined __MINGW32__
+  DWORD res = GetFileAttributes(path->buf);
+  return res != INVALID_FILE_ATTRIBUTES;
+#else
+  /*
+    We can either try to use stat or just access, access is more efficient
+    when not checking permissions.
+
+    struct stat tmp;
+    return stat(path->buf, &tmp) == 0;
+  */
+  return access(path->buf, F_OK) != -1;
+#endif
+}
+
+_CPATH_FUNC_
+void cpathClear(cpath *path) {
+  path->buf[0] = '\0';
+  path->len = 0;
+}
+
+/* == File System == */
+
 /*
   Get the current working directory allocating the space
 */
@@ -493,30 +629,29 @@ cpath_char_t *cpathGetCwdBuf(cpath_char_t *buf, size_t size) {
 }
 
 _CPATH_FUNC_
-int cpathOpenDir(cpath_dir *dir, const cpath_char_t *path) {
-  const cpath_char_t *pathStr;
-  size_t pathLen;
+void cpathWriteCwd(cpath *path) {
+  cpathGetCwdBuf(path->buf, CPATH_MAX_PATH_LEN);
+  path->len = cpath_str_length(path->buf);
+  cpathTrim(path);
+}
 
-  if (dir == NULL || path == NULL || ((pathLen = cpath_str_length(path)) == 0)) {
+_CPATH_FUNC_
+cpath cpathGetCwd() {
+  cpath path;
+  cpathWriteCwd(&path);
+  cpathTrim(&path);
+  return path;
+}
+
+_CPATH_FUNC_
+int cpathOpenDir(cpath_dir *dir, const cpath *path) {
+  if (dir == NULL || path == NULL || path->len == 0) {
     // empty strings are invalid arguments
     errno = EINVAL;
     return 0;
   }
 
-  // remove trailing slashes then check path length
-  pathStr = &path[pathLen - 1];
-  while (pathLen > 0 &&
-        (*pathStr == CPATH_STR('\\') || *pathStr == CPATH_STR('/'))) {
-    pathStr--;
-    pathLen--;
-  }
-
-  if (pathLen == 0) {
-    errno = EINVAL;
-    return 0;
-  }
-
-  if (pathLen + CPATH_PATH_EXTRA_CHARS >= CPATH_MAX_PATH_LEN) {
+  if (path->len + CPATH_PATH_EXTRA_CHARS >= CPATH_MAX_PATH_LEN) {
     errno = ENAMETOOLONG;
     return 0;
   }
@@ -528,8 +663,7 @@ int cpathOpenDir(cpath_dir *dir, const cpath_char_t *path) {
 #else
   dir->dir = NULL;
 #endif
-  dir->pathLen = pathLen;
-  dir->path[pathLen] = CPATH_STR('\0');
+  dir->path.buf[path->len] = CPATH_STR('\0');
   dir->parent = NULL;
   dir->files = NULL;
 #if defined _MSC_VER
@@ -539,14 +673,7 @@ int cpathOpenDir(cpath_dir *dir, const cpath_char_t *path) {
   dir->dirent = NULL;
 #endif
 
-  cpath_str dirPath = &dir->path[pathLen - 1];
-
-  while (dirPath >= dir->path && pathStr >= path) {
-    *dirPath = *pathStr;
-    dirPath--;
-    pathStr--;
-  }
-
+  cpathCopy(&dir->path, path);
   return cpathRestartDir(dir);
 }
 
@@ -562,7 +689,6 @@ int cpathRestartDir(cpath_dir *dir) {
   if (dir->files != NULL) CPATH_FREE(dir->files);
   dir->files = NULL;
 
-  // windows specific freeing
 #if defined _MSC_VER
   if (dir->handle != INVALID_HANDLE_VALUE) FindClose(dir->handle);
   dir->handle = INVALID_HANDLE_VALUE;
@@ -572,10 +698,7 @@ int cpathRestartDir(cpath_dir *dir) {
   dir->dirent = NULL;
 #endif
 
-  if (dir->parent != NULL) {
-    cpathCloseDir(dir->parent);
-    dir->parent = NULL;
-  }
+  // Ignore parent, just restart this dir
 
 #if defined _MSC_VER
   cpath_char_t pathBuf[CPATH_MAX_PATH_LEN];
@@ -592,15 +715,15 @@ int cpathRestartDir(cpath_dir *dir) {
   if (dir->handle == INVALID_HANDLE_VALUE) {
     errno = ENOENT;
     // free associate memory and exit
-    cpathCloseDir(dir);
+    cpathCloseDir(dir, 0);
     return 0;
   }
 
 #else
 
-  dir->dir = _cpath_opendir(dir->path);
+  dir->dir = _cpath_opendir(dir->path.buf);
   if (dir->dir == NULL) {
-    cpathCloseDir(dir);
+    cpathCloseDir(dir, 0);
     return 0;
   }
   dir->dirent = _cpath_readdir(dir->dir);
@@ -613,11 +736,28 @@ int cpathRestartDir(cpath_dir *dir) {
 }
 
 _CPATH_FUNC_
-void cpathCloseDir(cpath_dir *dir) {
+void cpathCloseDir(cpath_dir *dir, int closeParents) {
   if (dir == NULL) return;
 
-  cpathRestartDir(dir);
-  memset(dir->path, 0, sizeof(dir->path));
+  dir->hasNext = 1;
+  dir->size = -1;
+  if (dir->files != NULL) CPATH_FREE(dir->files);
+  dir->files = NULL;
+
+#if defined _MSC_VER
+  if (dir->handle != INVALID_HANDLE_VALUE) FindClose(dir->handle);
+  dir->handle = INVALID_HANDLE_VALUE;
+#else
+  if (dir->dir != NULL) _cpath_closedir(dir->dir);
+  dir->dir = NULL;
+  dir->dirent = NULL;
+#endif
+
+  cpathClear(&dir->path);
+  if (dir->parent != NULL) {
+    if (closeParents) cpathCloseDir(dir->parent, closeParents);
+    dir->parent = NULL;
+  }
 }
 
 int cpathMoveNextFile(cpath_dir *dir) {
@@ -669,7 +809,7 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
     filenameLen = dir->dirent->d_namlen;
 #endif
 
-    size_t totalLen = dir->pathLen + filenameLen;
+    size_t totalLen = dir->path.len + filenameLen;
     if (totalLen + 1 + CPATH_PATH_EXTRA_CHARS >= CPATH_MAX_PATH_LEN ||
         filenameLen >= CPATH_MAX_FILENAME_LEN) {
       errno = ENAMETOOLONG;
@@ -677,23 +817,23 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
     }
 
     cpath_str_copy(file->name, filename);
-    cpath_str_copy(file->path, dir->path);
-    cpath_str_concat(file->path, CPATH_STR("/"));
-    cpath_str_concat(file->path, filename);
+    cpathCopy(&file->path, &dir->path);
+    CPATH_CONCAT_LIT(&file->path, "/");
+    cpathConcatStr(&file->path, filename);
 
 #if !defined _MSC_VER
 #if defined __MINGW32__
-    if (_tstat(file->path, &file->stat) == -1) {
+    if (_tstat(file->path.buf, &file->stat) == -1) {
       return 0;
     }
 #elif defined _BSD_SOURCE || defined _DEFAULT_SOURCE	\
   || (defined _XOPEN_SOURCE && _XOPEN_SOURCE >= 500)	\
   || (defined _POSIX_C_SOURCE && _POSIX_C_SOURCE >= 200112L)
-    if (lstat(file->path, &file->stat) == -1) {
+    if (lstat(file->path.buf, &file->stat) == -1) {
       return 0;
     }
 #else
-    if (stat(file->path, &file->stat) == -1) {
+    if (stat(file->path.buf, &file->stat) == -1) {
       return 0;
     }
 #endif
@@ -744,6 +884,8 @@ int cpathLoadAllFiles(cpath_dir *dir) {
     errno = EINVAL;
     return 0;
   }
+
+  if (dir->files != NULL) CPATH_FREE(dir->files);
 
   // @Ugly:
   /*
@@ -871,7 +1013,25 @@ _CPATH_FUNC_
 int cpathRevertEmplace(cpath_dir *dir);
 
 _CPATH_FUNC_
-int cpathOpenFile(cpath_file *file, const cpath_char_t *path);
+int cpathOpenFile(cpath_file *file, const cpath_char_t *path) {
+  cpath_dir dir;
+  int res = 0;
+  int found = 0;
+
+#if defined _MSC_VER || defined __MINGW32__
+  cpath_char_t drive[CPATH_MAX_DRIVE_LEN];
+  cpath_char_t extension[CPATH_MAX_FILENAME_LEN];
+#endif
+
+  cpath_char_t dirpath[CPATH_MAX_PATH_LEN];
+  cpath_char_t filename[CPATH_MAX_FILENAME_LEN];
+  cpath_char_t *dirname;
+  cpath_char_t *basename;
+
+#if defined _MSC_VER || defined __MINGW32__
+#endif
+  return 0;
+}
 
 _CPATH_FUNC_
 int cpathFileToDir(cpath_dir *dir, const cpath_file *file) {
@@ -879,7 +1039,7 @@ int cpathFileToDir(cpath_dir *dir, const cpath_file *file) {
     errno = EINVAL;
     return 0;
   }
-  return cpathOpenDir(dir, file->path);
+  return cpathOpenDir(dir, &file->path);
 }
 
 _CPATH_FUNC_

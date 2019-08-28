@@ -37,15 +37,40 @@ void recursive_visit(cpath_dir dir, int tab) {
         if (file.isDir && !cpathFileIsSpecialHardLink(&file)) {
             cpath_dir tmp;
             cpathFileToDir(&tmp, &file);
-            // recursive_visit(tmp, tab + 1);
+            recursive_visit(tmp, tab + 1);
         }
+    }
+}
+
+void paths_example() {
+    // casts are automatic and should be crossplatform
+    // if you want to make it truly unicode independent and its a literal
+    // then you can use CPATH_STR() which will convert it to the wide version
+    // as required.  This of course only applies to string literals
+    // and you can use cpathFromString(myStr, path) to write to paths
+    cpath path = cpathGetCwd();
+    CPATH_CONCAT_LIT(&path, "a.out");
+
+    // if you want crossplatform
+    if (cpathExists(&path)) {
+        printf("Exists\n");
+        // path exists and the real name is
+        // cpath real;
+        // // cpathCanonicalise(path, &real);
+        // // you can map it to a string
+        // // this is very platform dependent... and won't work with unicode
+        // printf("%s\n", (char*)real);
+        // // it is safer to do
+        // char *str = cpathToUtf8(real);
+        // // or more performant to do
+        // cpathPrint(real);
     }
 }
 
 int main(void) {
     cpath_dir dir;
-    char *cwd = cpathGetCwdAlloc();
-    cpathOpenDir(&dir, cwd);
+    cpath path = cpathGetCwd();
+    cpathOpenDir(&dir, &path);
     recursive_visit(dir, 0);
-    free(cwd);
+    paths_example();
 }
