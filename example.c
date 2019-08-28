@@ -27,9 +27,9 @@
 [F] a.out
 */
 
-void recursive_visit(cpath_dir dir, int tab) {
+void recursive_visit(cpath_dir *dir, int tab) {
     cpath_file file;
-    while (cpathGetNextFile(&dir, &file)) {
+    while (cpathGetNextFile(dir, &file)) {
         for (int i = 0; i < tab; i++) putchar('\t');
         CPathByteRep flags = BYTE_REP_JEDEC | BYTE_REP_BYTE_WORD;
         printf("[%c] %s %.1lf %s\n", (file.isDir ? 'D' : 'F'), file.name,
@@ -37,8 +37,33 @@ void recursive_visit(cpath_dir dir, int tab) {
         if (file.isDir && !cpathFileIsSpecialHardLink(&file)) {
             cpath_dir tmp;
             cpathFileToDir(&tmp, &file);
-            recursive_visit(tmp, tab + 1);
+            recursive_visit(&tmp, tab + 1);
+            cpathCloseDir(&tmp);
         }
+    }
+}
+
+void emplace(cpath_dir *dir) {
+    /*
+        This method uses just one object and a few saved directories to iterate
+        This is safe from stackoverflow but will require dynamic allocation
+    */
+    cpath_file file;
+    int tab = 0;
+
+    while (dir != NULL) {
+        while (cpathGetNextFile(dir, &file)) {
+            for (int i = 0; i < tab; i++) putchar('\t');
+            CPathByteRep flags = BYTE_REP_JEDEC | BYTE_REP_BYTE_WORD;
+            printf("[%c] %s %.1lf %s\n", (file.isDir ? 'D' : 'F'), file.name,
+                cpathGetFileSizeDec(&file, 1000), cpathGetFileSizePrefix(&file, flags));
+            if (file.isDir && !cpathFileIsSpecialHardLink(&file)) {
+                cpathOpenSubFileEmplace(dir, &file, 1);
+                tab++;
+            }
+        }
+        cpathRevertEmplace(&dir);
+        tab--;
     }
 }
 
@@ -71,6 +96,17 @@ int main(void) {
     cpath_dir dir;
     cpath path = cpathGetCwd();
     cpathOpenDir(&dir, &path);
-    recursive_visit(dir, 0);
-    paths_example();
+    // recursive_visit(&dir, 0);
+    // paths_example();
+
+    emplace(&dir);
+
+    return 0;
+
+    cpath_file file;
+    CPATH_CONCAT_LIT(&path, "a.out");
+    cpathOpenFile(&file, &path);
+    CPathByteRep flags = BYTE_REP_JEDEC | BYTE_REP_BYTE_WORD;
+    printf("[%c] %s %.1lf %s\n", (file.isDir ? 'D' : 'F'), file.name,
+        cpathGetFileSizeDec(&file, 1000), cpathGetFileSizePrefix(&file, flags));
 }

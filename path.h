@@ -105,7 +105,7 @@ SOFTWARE.
 
 /* == #includes == */
 
-#if defined _MSC_VER_ || defined __MINGW32__
+#if defined _MSC_VER || defined __MINGW32__
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -181,7 +181,7 @@ typedef off_t cpath_offset_t;
 typedef time_t cpath_time_t;
 #endif
 
-#if defined _MSC_VER_ || defined __MINGW32__
+#if defined _MSC_VER || defined __MINGW32__
 #define CPATH_MAX_PATH_LEN MAX_PATH
 #elif defined __linux__ || defined BSD
 
@@ -225,8 +225,8 @@ typedef time_t cpath_time_t;
     @TODO: Do we actually need this???
 */
 #if defined _MSC_VER
-#define FILE_IS(file, flag) !!(file->findData.dwFileAttributes & FILE_ATTRIBUTE_##flag)
-#define FILE_IS_NOT(file, flag) !(file->findData.dwFileAttributes & FILE_ATTRIBUTE_##flag)
+#define FILE_IS(f, flag) !!(f.dwFileAttributes & FILE_ATTRIBUTE_##flag)
+#define FILE_IS_NOT(f, flag) !(f.dwFileAttributes & FILE_ATTRIBUTE_##flag)
 #endif
 
 #if defined _MSC_VER || defined __MINGW32__
@@ -356,7 +356,7 @@ int cpathOpenDir(cpath_dir *dir, const cpath *path);
   If closing parents then will recurse through all previous emplaces.
 */
 _CPATH_FUNC_
-void cpathCloseDir(cpath_dir *dir, int closeParents);
+void cpathCloseDir(cpath_dir *dir);
 
 /*
   Get the next file inside the directory, acts like an iterator.
@@ -414,6 +414,13 @@ _CPATH_FUNC_
 int cpathRestartDir(cpath_dir *dir);
 
 /*
+  Opens the next sub directory into this
+  Saves the old directory into the parent if given saveDir
+*/
+_CPATH_FUNC_
+int cpathOpenSubFileEmplace(cpath_dir *dir, const cpath_file *file,int saveDir);
+
+/*
   Opens the n'th sub directory into other given directory
 */
 _CPATH_FUNC_
@@ -423,27 +430,34 @@ int cpathOpenSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
   Opens the next sub directory into other given directory
 */
 _CPATH_FUNC_
-int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
+int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir);
 
 /*
   Opens the next sub directory into this
   Saves the old directory into the parent if given saveDir
 */
 _CPATH_FUNC_
-int cpathOpenNextSubDirEmplace(cpath_dir *dir, size_t n, int saveDir);
+int cpathOpenNextSubDirEmplace(cpath_dir *dir, int saveDir);
 
 /*
   Revert an emplace and go back to the parent.
   Note: This can occur multiple times.
+  Returns true if it went back to the parent.
 */
 _CPATH_FUNC_
-int cpathRevertEmplace(cpath_dir *dir);
+int cpathRevertEmplace(cpath_dir **dir);
+
+/*
+
+*/
+_CPATH_FUNC_
+int cpathRevertEmplaceCopy(cpath_dir *dir);
 
 /*
   Opens the given path as a file.
 */
 _CPATH_FUNC_
-int cpathOpenFile(cpath_file *file, const cpath_char_t *path);
+int cpathOpenFile(cpath_file *file, const cpath *path);
 
 /*
   Converts a given file to a directory.
@@ -715,7 +729,7 @@ int cpathRestartDir(cpath_dir *dir) {
   if (dir->handle == INVALID_HANDLE_VALUE) {
     errno = ENOENT;
     // free associate memory and exit
-    cpathCloseDir(dir, 0);
+    cpathCloseDir(dir);
     return 0;
   }
 
@@ -723,7 +737,7 @@ int cpathRestartDir(cpath_dir *dir) {
 
   dir->dir = _cpath_opendir(dir->path.buf);
   if (dir->dir == NULL) {
-    cpathCloseDir(dir, 0);
+    cpathCloseDir(dir);
     return 0;
   }
   dir->dirent = _cpath_readdir(dir->dir);
@@ -736,7 +750,7 @@ int cpathRestartDir(cpath_dir *dir) {
 }
 
 _CPATH_FUNC_
-void cpathCloseDir(cpath_dir *dir, int closeParents) {
+void cpathCloseDir(cpath_dir *dir) {
   if (dir == NULL) return;
 
   dir->hasNext = 1;
@@ -755,7 +769,8 @@ void cpathCloseDir(cpath_dir *dir, int closeParents) {
 
   cpathClear(&dir->path);
   if (dir->parent != NULL) {
-    if (closeParents) cpathCloseDir(dir->parent, closeParents);
+    cpathCloseDir(dir->parent);
+    CPATH_FREE(dir->parent);
     dir->parent = NULL;
   }
 }
@@ -790,6 +805,53 @@ int cpathMoveNextFile(cpath_dir *dir) {
 }
 
 _CPATH_FUNC_
+int cpathGetFileInfo(cpath_file *file, void *data) {
+#if !defined _MSC_VER
+#if defined __MINGW32__
+  if (_tstat(file->path.buf, &file->stat) == -1) {
+    return 0;
+  }
+#elif defined _BSD_SOURCE || defined _DEFAULT_SOURCE	\
+      || (defined _XOPEN_SOURCE && _XOPEN_SOURCE >= 500)	\
+      || (defined _POSIX_C_SOURCE && _POSIX_C_SOURCE >= 200112L)
+  if (lstat(file->path.buf, &file->stat) == -1) {
+    return 0;
+  }
+#else
+  if (stat(file->path.buf, &file->stat) == -1) {
+    return 0;
+  }
+#endif
+#endif
+
+#if defined _MSC_VER
+  WIN32_FIND_DATA *find = (WIN32_FIND_DATA*) data;
+  file->isDir = FILE_IS(find, DIRECTORY);
+  if (FILE_IS(find, NORMAL)) {
+    file->isReg = 1;
+  } else if (FILE_IS_NOT(find, DEVICE) && FILE_IS_NOT(find, DIRECTORY) &&
+             FILE_IS_NOT(find, ENCRYPTED) && FILE_IS_NOT(find, OFFLINE) &&
+#ifdef FILE_ATTRIBUTE_INTEGRITY_STREAM
+             FILE_IS_NOT(find, INTEGRITY_STREAM) &&
+#endif
+#ifdef FILE_ATTRIBUTE_NO_SCRUB_DATA
+             FILE_IS_NOT(find, NO_SCRUB_DATA) &&
+#endif
+              FILE_IS_NOT(find, TEMPORARY)) {
+    file->isReg = 1;
+  } else {
+    file->isReg = 0;
+  }
+  file->isSym = FILE_IS(find, REPARSE_POINT);
+#else
+  file->isDir = S_ISDIR(file->stat.st_mode);
+  file->isReg = S_ISREG(file->stat.st_mode);
+  file->isSym = S_ISLNK(file->stat.st_mode);
+#endif
+  return 1;
+}
+
+_CPATH_FUNC_
 int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
   if (file != NULL) {
     // load current file into file
@@ -808,7 +870,6 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
     filename = dir->dirent->d_name;
     filenameLen = dir->dirent->d_namlen;
 #endif
-
     size_t totalLen = dir->path.len + filenameLen;
     if (totalLen + 1 + CPATH_PATH_EXTRA_CHARS >= CPATH_MAX_PATH_LEN ||
         filenameLen >= CPATH_MAX_FILENAME_LEN) {
@@ -820,49 +881,15 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
     cpathCopy(&file->path, &dir->path);
     CPATH_CONCAT_LIT(&file->path, "/");
     cpathConcatStr(&file->path, filename);
-
-#if !defined _MSC_VER
-#if defined __MINGW32__
-    if (_tstat(file->path.buf, &file->stat) == -1) {
-      return 0;
-    }
-#elif defined _BSD_SOURCE || defined _DEFAULT_SOURCE	\
-  || (defined _XOPEN_SOURCE && _XOPEN_SOURCE >= 500)	\
-  || (defined _POSIX_C_SOURCE && _POSIX_C_SOURCE >= 200112L)
-    if (lstat(file->path.buf, &file->stat) == -1) {
-      return 0;
-    }
-#else
-    if (stat(file->path.buf, &file->stat) == -1) {
-      return 0;
-    }
-#endif
-#endif
     cpathGetExtension(file);
-
+    void *data = NULL;
 #if defined _MSC_VER
-    file->isDir = FILE_IS(dir, DIRECTORY);
-    if (FILE_IS(dir, NORMAL)) {
-      file->isReg = 1;
-    } else if (FILE_IS_NOT(dir, DEVICE) && FILE_IS_NOT(dir, DIRECTORY) &&
-               FILE_IS_NOT(dir, ENCRYPTED) && FILE_IS_NOT(dir, OFFLINE) &&
-#ifdef FILE_ATTRIBUTE_INTEGRITY_STREAM
-               FILE_IS_NOT(dir, INTEGRITY_STREAM) &&
+    data = dir->findData;
 #endif
-#ifdef FILE_ATTRIBUTE_NO_SCRUB_DATA
-               FILE_IS_NOT(dir, NO_SCRUB_DATA) &&
-#endif
-               FILE_IS_NOT(dir, TEMPORARY)) {
-      file->isReg = 1;
-    } else {
-      file->isReg = 0;
+
+    if (!cpathGetFileInfo(file, data)) {
+      return 0;
     }
-    file->isSym = FILE_IS(dir, REPARSE_POINT);
-#else
-    file->isDir = S_ISDIR(file->stat.st_mode);
-    file->isReg = S_ISREG(file->stat.st_mode);
-    file->isSym = S_ISLNK(file->stat.st_mode);
-#endif
   }
 
   errno = 0;
@@ -998,39 +1025,132 @@ int cpathGetFileConst(cpath_dir *dir, const cpath_file **file, size_t n) {
 }
 
 _CPATH_FUNC_
-int cpathOpenSubDirEmplace(cpath_dir *dir, size_t n, int saveDir);
+int cpathOpenSubFileEmplace(cpath_dir *dir, const cpath_file *file,
+                            int saveDir) {
+  cpath_dir *saved = NULL;
+  if (saveDir) {
+    // save the old one
+    saved = (cpath_dir*)CPATH_MALLOC(sizeof(cpath_dir));
+    if (saved != NULL) memcpy(saved, dir, sizeof(cpath_dir));
+  }
+
+  if (!cpathFileToDir(dir, file)) {
+    if (saved != NULL) CPATH_FREE(saved);
+    return 0;
+  }
+
+  dir->parent = saved;
+
+  return 1;
+}
+
+_CPATH_FUNC_
+int cpathOpenSubDirEmplace(cpath_dir *dir, size_t n, int saveDir) {
+  if (dir == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+  if (!cpathCheckGetN(dir, n)) return 0;
+
+  const cpath_file *file;
+  if (!cpathGetFileConst(dir, &file, n) ||
+      !cpathOpenSubFileEmplace(dir, file, saveDir)) {
+    return 0;
+  }
+
+  return 1;
+}
 
 _CPATH_FUNC_
 int cpathOpenSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
 
 _CPATH_FUNC_
-int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
+int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir);
 
 _CPATH_FUNC_
-int cpathOpenNextSubDirEmplace(cpath_dir *dir, size_t n, int saveDir);
+int cpathOpenNextSubDirEmplace(cpath_dir *dir, int saveDir);
 
 _CPATH_FUNC_
-int cpathRevertEmplace(cpath_dir *dir);
+int cpathRevertEmplace(cpath_dir **dir) {
+  if (dir == NULL || *dir == NULL) return 0;
+  cpath_dir *tmp = (*dir)->parent;
+  (*dir)->parent = NULL;
+  cpathCloseDir(*dir);
+  *dir = tmp;
+  return *dir != NULL;
+}
 
 _CPATH_FUNC_
-int cpathOpenFile(cpath_file *file, const cpath_char_t *path) {
+int cpathRevertEmplaceCopy(cpath_dir *dir) {
+  if (dir == NULL) return 0;
+  cpath_dir *tmp = dir->parent;
+  dir->parent = NULL;
+  cpathCloseDir(dir);
+  if (tmp != NULL) {
+    memcpy(dir, tmp, sizeof(cpath_dir));
+  }
+  return tmp != NULL;
+}
+
+_CPATH_FUNC_
+int cpathOpenFile(cpath_file *file, const cpath *path) {
+  // We want to efficiently open this file so unlike most libraries
+  // we won't use a directory search we will just find the given file
+  // or directly use stuff like dirname/basename!
   cpath_dir dir;
-  int res = 0;
   int found = 0;
 
-#if defined _MSC_VER || defined __MINGW32__
-  cpath_char_t drive[CPATH_MAX_DRIVE_LEN];
-  cpath_char_t extension[CPATH_MAX_FILENAME_LEN];
+  if (file == NULL || path == NULL || path->len == 0) {
+    errno = EINVAL;
+    return 0;
+  }
+  if (path->len >= CPATH_MAX_PATH_LEN) {
+    errno = ENAMETOOLONG;
+    return 0;
+  }
+
+  void *data = NULL;
+  void *handle = NULL;
+
+  cpathCopy(&file->path, path);
+
+#if defined _MSC_VER
+  WIN32_FIND_DATA findData;
+
+#if (defined WINAPI_FAMILY) && (WINAPI_FAMILY != WINAPI_FAMILY_DESKTOP_APP)
+  handle = FindFirstFileEx(path->buf, FindExInfoStandard, &findData,
+                                FindExSearchNameMatch, NULL, 0);
+#else
+  handle = FindFirstFile(path->buf, &findData);
 #endif
 
-  cpath_char_t dirpath[CPATH_MAX_PATH_LEN];
-  cpath_char_t filename[CPATH_MAX_FILENAME_LEN];
-  cpath_char_t *dirname;
-  cpath_char_t *basename;
+  if (handle == INVALID_HANDLE_VALUE) {
+    errno = ENOENT;
+    return 0;
+  }
 
-#if defined _MSC_VER || defined __MINGW32__
+  data = &findData;
+  cpath_str_copy(file->name, findData.cFileName);
+#else
+  // copy the name then strip to just basename
+  // this is very ewwwww, honestly we probably would be better
+  // to just do this ourselves since ugh
+  cpath_strn_copy(file->name, path->buf, path->len);
+  char *tmp = basename(file->name);
+  // some systems allocate it seems.. ugh
+  if (tmp != file->name) {
+    cpath_str_copy(file->name, tmp);
+    CPATH_FREE(tmp);
+  }
+  // @TODO: make sure tmp isn't too long
 #endif
-  return 0;
+
+  int res = cpathGetFileInfo(file, data);
+#if defined _MSC_VER
+  FindClose((HANDLE)handle);
+#endif
+
+  return res;
 }
 
 _CPATH_FUNC_
@@ -1059,7 +1179,7 @@ cpath_str cpathGetExtension(cpath_file *file) {
 
 _CPATH_FUNC_
 cpath_time_t cpathGetLastAccess(cpath_file *file) {
-#if defined _MSC_VER_ || defined __MINGW32__
+#if defined _MSC_VER || defined __MINGW32__
   // Idk todo
 #else
   return file->stat.st_atime;
@@ -1068,7 +1188,7 @@ cpath_time_t cpathGetLastAccess(cpath_file *file) {
 
 _CPATH_FUNC_
 cpath_time_t cpathGetLastModification(cpath_file *file) {
-#if defined _MSC_VER_ || defined __MINGW32__
+#if defined _MSC_VER || defined __MINGW32__
   // Idk todo
 #else
   return file->stat.st_mtime;
@@ -1077,7 +1197,7 @@ cpath_time_t cpathGetLastModification(cpath_file *file) {
 
 _CPATH_FUNC_
 cpath_offset_t cpathGetFileSize(cpath_file *file) {
-#if defined _MSC_VER_ || defined __MINGW32__
+#if defined _MSC_VER || defined __MINGW32__
   // Idk todo
 #else
   return file->stat.st_size;
@@ -1100,14 +1220,6 @@ void cpathSort(cpath_dir *dir, cpath_cmp cmp) {
   }
   qsort(dir->files, dir->size, sizeof(struct cpath_dir_t), cmp);
 }
-
-/*
-  BYTE_REP_JEDEC          = 0,  // KB = 1024, ...
-  BYTE_REP_DECIMAL        = 1,  // 1000 interval segments, kB, MB, GB, ...
-  BYTE_REP_IEC            = 2,  // KiB = 1024, ...
-  BYTE_REP_DECIMAL_UPPER  = 3,  // 1000 interval segments but KB, MB, GB, ...
-  BYTE_REP_DECIMAL_LOWER  = 4,  // 1000 interval segments but kb, mb, gb, ...
-*/
 
 static const cpath_char_t *prefixTableDecimal[] = {
   CPATH_STR("kB"), CPATH_STR("MB"), CPATH_STR("GB"), CPATH_STR("TB"),
