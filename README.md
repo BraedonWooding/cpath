@@ -30,13 +30,21 @@ I would like to put a thanks out to a lot of other similar libraries for giving 
 ## Benchmarks
 
 > Model Name: MacBook Air
+
 > Model Identifier: MacBookAir7,2
+
 > Processor Name: Intel Core i5
+
 > Processor Speed: 1.6 GHz
+
 > Number of Processors: 1
+
 > Total Number of Cores: 2
+
 > L2 Cache (per Core): 256 KB
+
 > L3 Cache: 3 MB
+
 > Memory: 8 GB
 
 Resultant stats running the given shell file:
