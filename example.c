@@ -31,15 +31,13 @@ void recursive_visit(cpath_dir dir, int tab) {
     cpath_file file;
     while (cpathGetNextFile(&dir, &file)) {
         for (int i = 0; i < tab; i++) putchar('\t');
-        printf("[%c] %s\n", (file.isDir ? 'D' : 'F'), file.name);
-        // NOTE: you have to check for stuff like this:
-        //       you can also write `!file.isSym` to just straight up
-        //       avoid all symlinks which is probably a smart decision
-        if (file.isDir && strcmp(file.name, CPATH_STRING("..")) &&
-            strcmp(file.name, CPATH_STRING("."))) {
+        CPathByteRep flags = BYTE_REP_JEDEC | BYTE_REP_BYTE_WORD;
+        printf("[%c] %s %.1lf %s\n", (file.isDir ? 'D' : 'F'), file.name,
+            cpathGetFileSizeDec(&file, 1000), cpathGetFileSizePrefix(&file, flags));
+        if (file.isDir && !cpathFileIsSpecialHardLink(&file)) {
             cpath_dir tmp;
             cpathFileToDir(&tmp, &file);
-            recursive_visit(tmp, tab + 1);
+            // recursive_visit(tmp, tab + 1);
         }
     }
 }

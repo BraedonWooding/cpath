@@ -77,7 +77,7 @@ SOFTWARE.
 
 /* == #includes == */
 
-#if defined _MSC_VER_ || defined __MING32__
+#if defined _MSC_VER_ || defined __MINGW32__
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -120,10 +120,10 @@ SOFTWARE.
 #define CPATH_MAX_FILENAME_LEN (256)
 
 /* Windows Unicode Support */
-#if defined _MSC_VER || defined __MING32__
+#if defined _MSC_VER || defined __MINGW32__
 
 typedef TCHAR cpath_char_t;
-#define CPATH_STRING(str) _TEXT(str)
+#define CPATH_STR(str) _TEXT(str)
 #define cpath_str_length _tcslen
 #define cpath_str_copy _tcscpy
 #define cpath_str_concat _tcscat
@@ -133,7 +133,7 @@ typedef TCHAR cpath_char_t;
 #else
 
 typedef char cpath_char_t;
-#define CPATH_STRING(str) str
+#define CPATH_STR(str) str
 #define cpath_str_length strlen
 #define cpath_str_copy strcpy
 #define cpath_str_concat strcat
@@ -142,7 +142,16 @@ typedef char cpath_char_t;
 
 #endif
 
-#if defined _MSC_VER_ || defined __MING32__
+#if defined _MSC_VER || defined __MINGW32__
+// todo
+typedef cpath_offset_t;
+typedef cpath_time_t;
+#else
+typedef off_t cpath_offset_t;
+typedef time_t cpath_time_t;
+#endif
+
+#if defined _MSC_VER_ || defined __MINGW32__
 #define CPATH_MAX_PATH_LEN MAX_PATH
 #elif defined __linux__ || defined BSD
 
@@ -185,6 +194,11 @@ typedef char cpath_char_t;
     an incorrect token.
     @TODO: Do we actually need this???
 */
+#if defined _MSC_VER
+#define FILE_IS(file, flag) !!(file->findData.dwFileAttributes & FILE_ATTRIBUTE_##flag)
+#define FILE_IS_NOT(file, flag) !(file->findData.dwFileAttributes & FILE_ATTRIBUTE_##flag)
+#endif
+
 #if defined _MSC_VER || defined __MINGW32__
 #define CPATH_MAX_DRIVE_LEN (3)
 #elif __cpp_static_assert
@@ -206,7 +220,7 @@ typedef char cpath_char_t;
 #endif
 
 #if !defined _MSC_VER
-#if defined __MING32__ && defined _UNICODE
+#if defined __MINGW32__ && defined _UNICODE
 typedef _WDIR cpath_dirdata_t;
 typedef struct _wdirent cpath_dirent_t;
 #define _cpath_opendir _wopendir
@@ -225,11 +239,12 @@ typedef cpath_char_t *cpath_str;
 typedef int(*cpath_cmp)(const void*, const void*);
 
 typedef struct cpath_file_t {
-    int isDir;
-    int isReg;
+  int isDir;
+  int isReg;
+  int isSym;
 
 #if !defined _MSC_VER
-#if defined __MING32__
+#if defined __MINGW32__
     struct _stat stat;
 #else
     struct stat stat;
@@ -262,6 +277,20 @@ typedef struct cpath_dir_t {
   cpath_char_t path[CPATH_MAX_PATH_LEN];
   size_t pathLen;
 } cpath_dir;
+
+typedef int CPathByteRep;
+
+enum {
+  BYTE_REP_JEDEC          = 0,  // KB = 1024, ...
+  BYTE_REP_DECIMAL        = 1,  // 1000 interval segments, B, kB, MB, GB, ...
+  BYTE_REP_IEC            = 2,  // KiB = 1024, ...
+  BYTE_REP_DECIMAL_UPPER  = 3,  // 1000 interval segments but B, KB, MB, GB, ...
+  BYTE_REP_DECIMAL_LOWER  = 4,  // 1000 interval segments but b, kb, mb, gb, ...
+
+  // representations
+  BYTE_REP_LONG           = 0b10000000, // Represent as words i.e. kibibytes
+  BYTE_REP_BYTE_WORD      = 0b01000000, // Just `B` as `Byte` (only bytes)
+};
 
 /* == Declarations == */
 
@@ -348,17 +377,13 @@ int cpathRestartDir(cpath_dir *dir);
   Opens the n'th sub directory into other given directory
 */
 _CPATH_FUNC_
-int cpathOpenSubDir(
-  cpath_dir *out, cpath_dir *dir, size_t n
-);
+int cpathOpenSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
 
 /*
   Opens the next sub directory into other given directory
 */
 _CPATH_FUNC_
-int cpathOpenNextSubDir(
-  cpath_dir *out, cpath_dir *dir, size_t n
-);
+int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
 
 /*
   Opens the next sub directory into this
@@ -402,6 +427,54 @@ cpath_str cpathGetExtension(cpath_file *file);
 _CPATH_FUNC_
 void cpathSort(cpath_dir *dir, cpath_cmp cmp);
 
+/*
+  Is this file either `.` or `..`
+*/
+_CPATH_FUNC_
+int cpathFileIsSpecialHardLink(cpath_file *file);
+
+/*
+  Get the time of last access
+*/
+_CPATH_FUNC_
+cpath_time_t cpathGetLastAccess(cpath_file *file);
+
+/*
+  Get the time of last modification
+*/
+_CPATH_FUNC_
+cpath_time_t cpathGetLastModification(cpath_file *file);
+
+/*
+  Get the time of last access as a formatted string
+*/
+_CPATH_FUNC_
+char *cpathGetLastAccessStr(cpath_file *file);
+
+/*
+  Get the time of last modification as a formatted string
+*/
+_CPATH_FUNC_
+char *cpathGetLastModificationStr(cpath_file *file);
+
+/*
+  Get the file size in bytes of this file.
+*/
+_CPATH_FUNC_
+cpath_offset_t cpathGetFileSize(cpath_file *file);
+
+/*
+  Get the file size prefix
+*/
+_CPATH_FUNC_
+const cpath_char_t *cpathGetFileSizePrefix(cpath_file *file, CPathByteRep rep);
+
+/*
+  Get the file size in decimal form
+*/
+_CPATH_FUNC_
+double cpathGetFileSizeDec(cpath_file *file, int interval);
+
 /* == Definitions == */
 
 /*
@@ -433,7 +506,7 @@ int cpathOpenDir(cpath_dir *dir, const cpath_char_t *path) {
   // remove trailing slashes then check path length
   pathStr = &path[pathLen - 1];
   while (pathLen > 0 &&
-        (*pathStr == CPATH_STRING('\\') || *pathStr == CPATH_STRING('/'))) {
+        (*pathStr == CPATH_STR('\\') || *pathStr == CPATH_STR('/'))) {
     pathStr--;
     pathLen--;
   }
@@ -456,7 +529,7 @@ int cpathOpenDir(cpath_dir *dir, const cpath_char_t *path) {
   dir->dir = NULL;
 #endif
   dir->pathLen = pathLen;
-  dir->path[pathLen] = CPATH_STRING('\0');
+  dir->path[pathLen] = CPATH_STR('\0');
   dir->parent = NULL;
   dir->files = NULL;
 #if defined _MSC_VER
@@ -507,7 +580,7 @@ int cpathRestartDir(cpath_dir *dir) {
 #if defined _MSC_VER
   cpath_char_t pathBuf[CPATH_MAX_PATH_LEN];
   cpath_str_copy(pathBuf, dir->path);
-  cpath_str_cat(pathBuf, CPATH_STRING("\\*"));
+  cpath_str_cat(pathBuf, CPATH_STR("\\*"));
 
 #if (defined WINAPI_FAMILY) && (WINAPI_FAMILY != WINAPI_FAMILY_DESKTOP_APP)
   dir->handle = FindFirstFileEx(path_buf, FindExInfoStandard, &dir->findData,
@@ -605,11 +678,11 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
 
     cpath_str_copy(file->name, filename);
     cpath_str_copy(file->path, dir->path);
-    cpath_str_concat(file->path, CPATH_STRING("/"));
+    cpath_str_concat(file->path, CPATH_STR("/"));
     cpath_str_concat(file->path, filename);
 
 #if !defined _MSC_VER
-#if defined __MING32__
+#if defined __MINGW32__
     if (_tstat(file->path, &file->stat) == -1) {
       return 0;
     }
@@ -627,28 +700,28 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
 #endif
     cpathGetExtension(file);
 
-#ifdef _MSC_VER
-    file->isDir = !!(dir->_f.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
-    if (dir->_f.dwFileAttributes & FILE_ATTRIBUTE_NORMAL) {
+#if defined _MSC_VER
+    file->isDir = FILE_IS(dir, DIRECTORY);
+    if (FILE_IS(dir, NORMAL)) {
       file->isReg = 1;
-    } else if (!(dir->_f.dwFileAttributes & FILE_ATTRIBUTE_DEVICE) &&
-               !(dir->_f.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-               !(dir->_f.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) &&
+    } else if (FILE_IS_NOT(dir, DEVICE) && FILE_IS_NOT(dir, DIRECTORY) &&
+               FILE_IS_NOT(dir, ENCRYPTED) && FILE_IS_NOT(dir, OFFLINE) &&
 #ifdef FILE_ATTRIBUTE_INTEGRITY_STREAM
-               !(dir->_f.dwFileAttributes & FILE_ATTRIBUTE_INTEGRITY_STREAM) &&
+               FILE_IS_NOT(dir, INTEGRITY_STREAM) &&
 #endif
 #ifdef FILE_ATTRIBUTE_NO_SCRUB_DATA
-               !(dir->_f.dwFileAttributes & FILE_ATTRIBUTE_NO_SCRUB_DATA) &&
+               FILE_IS_NOT(dir, NO_SCRUB_DATA) &&
 #endif
-               !(dir->_f.dwFileAttributes & FILE_ATTRIBUTE_OFFLINE) &&
-               !(dir->_f.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY)) {
+               FILE_IS_NOT(dir, TEMPORARY)) {
       file->isReg = 1;
     } else {
       file->isReg = 0;
     }
+    file->isSym = FILE_IS(dir, REPARSE_POINT);
 #else
     file->isDir = S_ISDIR(file->stat.st_mode);
     file->isReg = S_ISREG(file->stat.st_mode);
+    file->isSym = S_ISLNK(file->stat.st_mode);
 #endif
   }
 
@@ -658,6 +731,11 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
   }
 
   return 1;
+}
+
+_CPATH_FUNC_
+int cpathFileIsSpecialHardLink(cpath_file *file) {
+  return !strcmp(file->name, "..") || !strcmp(file->name, ".");
 }
 
 _CPATH_FUNC_
@@ -781,14 +859,10 @@ _CPATH_FUNC_
 int cpathOpenSubDirEmplace(cpath_dir *dir, size_t n, int saveDir);
 
 _CPATH_FUNC_
-int cpathOpenSubDir(
-  cpath_dir *out, cpath_dir *dir, size_t n
-);
+int cpathOpenSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
 
 _CPATH_FUNC_
-int cpathOpenNextSubDir(
-  cpath_dir *out, cpath_dir *dir, size_t n
-);
+int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir, size_t n);
 
 _CPATH_FUNC_
 int cpathOpenNextSubDirEmplace(cpath_dir *dir, size_t n, int saveDir);
@@ -812,7 +886,7 @@ _CPATH_FUNC_
 cpath_str cpathGetExtension(cpath_file *file) {
   if (file->extension != NULL) return file->extension;
 
-  cpath_char_t *dot = cpath_str_find_last_char(file->name, CPATH_STRING('.'));
+  cpath_char_t *dot = cpath_str_find_last_char(file->name, CPATH_STR('.'));
   if (dot != NULL) {
     // extension
     file->extension = dot + 1;
@@ -821,6 +895,33 @@ cpath_str cpathGetExtension(cpath_file *file) {
     file->extension = &file->name[cpath_str_length(file->name)];
   }
   return file->extension;
+}
+
+_CPATH_FUNC_
+cpath_time_t cpathGetLastAccess(cpath_file *file) {
+#if defined _MSC_VER_ || defined __MINGW32__
+  // Idk todo
+#else
+  return file->stat.st_atime;
+#endif
+}
+
+_CPATH_FUNC_
+cpath_time_t cpathGetLastModification(cpath_file *file) {
+#if defined _MSC_VER_ || defined __MINGW32__
+  // Idk todo
+#else
+  return file->stat.st_mtime;
+#endif
+}
+
+_CPATH_FUNC_
+cpath_offset_t cpathGetFileSize(cpath_file *file) {
+#if defined _MSC_VER_ || defined __MINGW32__
+  // Idk todo
+#else
+  return file->stat.st_size;
+#endif
 }
 
 _CPATH_FUNC_
@@ -838,4 +939,83 @@ void cpathSort(cpath_dir *dir, cpath_cmp cmp) {
     }
   }
   qsort(dir->files, dir->size, sizeof(struct cpath_dir_t), cmp);
+}
+
+/*
+  BYTE_REP_JEDEC          = 0,  // KB = 1024, ...
+  BYTE_REP_DECIMAL        = 1,  // 1000 interval segments, kB, MB, GB, ...
+  BYTE_REP_IEC            = 2,  // KiB = 1024, ...
+  BYTE_REP_DECIMAL_UPPER  = 3,  // 1000 interval segments but KB, MB, GB, ...
+  BYTE_REP_DECIMAL_LOWER  = 4,  // 1000 interval segments but kb, mb, gb, ...
+*/
+
+static const cpath_char_t *prefixTableDecimal[] = {
+  CPATH_STR("kB"), CPATH_STR("MB"), CPATH_STR("GB"), CPATH_STR("TB"),
+  CPATH_STR("PB"), CPATH_STR("EB"), CPATH_STR("ZB"), CPATH_STR("YB"),
+};
+static const cpath_char_t *prefixTableDecimalUpper[] = {
+  CPATH_STR("KB"), CPATH_STR("MB"), CPATH_STR("GB"), CPATH_STR("TB"),
+  CPATH_STR("PB"), CPATH_STR("EB"), CPATH_STR("ZB"), CPATH_STR("YB"),
+};
+static const cpath_char_t *prefixTableDecimalLower[] = {
+  CPATH_STR("kb"), CPATH_STR("mb"), CPATH_STR("gb"), CPATH_STR("tb"),
+  CPATH_STR("pb"), CPATH_STR("eb"), CPATH_STR("zb"), CPATH_STR("yb"),
+};
+static const cpath_char_t *prefixTableIEC[] = {
+  CPATH_STR("KiB"), CPATH_STR("MiB"), CPATH_STR("GiB"), CPATH_STR("TiB"),
+  CPATH_STR("PiB"), CPATH_STR("EiB"), CPATH_STR("ZiB"), CPATH_STR("YiB"),
+};
+// identical to decimal upper but kept separate for the sake of readability
+static const cpath_char_t *prefixTableJEDEC[] = {
+  CPATH_STR("KB"), CPATH_STR("MB"), CPATH_STR("GB"), CPATH_STR("TB"),
+  CPATH_STR("PB"), CPATH_STR("EB"), CPATH_STR("ZB"), CPATH_STR("YB"),
+};
+
+_CPATH_FUNC_
+double cpathGetFileSizeDec(cpath_file *file, int intervalSize) {
+  double size = cpathGetFileSize(file);
+  int steps = 0;
+  while (size >= intervalSize / 2 && steps < 8) {
+    size /= intervalSize;
+    steps++;
+  }
+  return size;
+}
+
+_CPATH_FUNC_
+const cpath_char_t *cpathGetFileSizePrefix(cpath_file *file, CPathByteRep rep) {
+  cpath_offset_t size = cpathGetFileSize(file);
+  int word = (rep & BYTE_REP_LONG) == BYTE_REP_LONG;
+  int byte_word = (rep & BYTE_REP_BYTE_WORD) == BYTE_REP_BYTE_WORD;
+  // disable both them to make comparing easier
+  rep &= ~BYTE_REP_LONG;
+  rep &= ~BYTE_REP_BYTE_WORD;
+  int interval = rep == BYTE_REP_IEC || rep == BYTE_REP_JEDEC ? 1024 : 1000;
+
+  if (size < interval / 2) {
+    // then we just have a byte case
+    if (word || byte_word) {
+      return rep != BYTE_REP_DECIMAL_LOWER ? CPATH_STR("Bytes")
+                                           : CPATH_STR("bytes");
+    } else {
+      return rep != BYTE_REP_DECIMAL_LOWER ? CPATH_STR("B")
+                                           : CPATH_STR("b");
+    }
+  }
+
+  int steps = 0;
+  double size_flt = size;
+  while (size_flt >= interval / 2 && steps < 8) {
+    size_flt /= (double)interval;
+    steps++;
+  }
+
+  switch (rep) {
+    case BYTE_REP_IEC:            return prefixTableIEC[steps - 1];
+    case BYTE_REP_JEDEC:          return prefixTableJEDEC[steps - 1];
+    case BYTE_REP_DECIMAL:        return prefixTableDecimal[steps - 1];
+    case BYTE_REP_DECIMAL_LOWER:  return prefixTableDecimalLower[steps - 1];
+    case BYTE_REP_DECIMAL_UPPER:  return prefixTableDecimalUpper[steps - 1];
+    default: return NULL;
+  }
 }
