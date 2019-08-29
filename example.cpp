@@ -12,7 +12,7 @@ void recursive_visit(Dir &dir, int tab) {
     std::cout << "[" << (file->IsDir() ? 'D' : 'F') << "] "
               << file->Name() << " " << std::fixed << std::setprecision(1)
               << file->GetFileSizeDec(1024) << " "
-              << file->GetFileSizePrefix(flags) << std::endl;
+              << file->GetFileSizeSuffix(flags) << std::endl;
     if (file->IsDir() && !file->IsSpecialHardLink()) {
       Opt<Dir, Error::Type> dir = file->ToDir();
       recursive_visit(**dir, tab + 1);
@@ -34,7 +34,7 @@ void emplace(Dir &dir) {
       std::cout << "[" << (file->IsDir() ? 'D' : 'F') << "] "
                 << file->Name() << " " << std::fixed << std::setprecision(1)
                 << file->GetFileSizeDec(1024) << " "
-                << file->GetFileSizePrefix(flags) << std::endl;
+                << file->GetFileSizeSuffix(flags) << std::endl;
       if (file->IsDir() && !file->IsSpecialHardLink()) {
         dir.OpenSubFileEmplace(**file, true);
         tab++;
@@ -56,5 +56,5 @@ int main(void) {
   std::cout << "[" << (file->IsDir() ? 'D' : 'F') << "] "
             << file->Name() << " " << std::fixed << std::setprecision(1)
             << file->GetFileSizeDec(1024) << " "
-            << file->GetFileSizePrefix(flags) << std::endl;
+            << file->GetFileSizeSuffix(flags) << std::endl;
 }

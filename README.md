@@ -20,6 +20,50 @@ I chose to make this very young i.e. C89/C99 ish since I was already going quite
 
 I would like to put a thanks out to a lot of other similar libraries for giving me some source to compare against to make sure I was using the APIs correctly and some ideas for how to structure my API.
 
+## Comparisons against other libraries
+
+> If you want performance comparisons check out the benchmarks, TLDR though is that CPath is often around 3x faster than other libraries and even faster than `find`.
+
+CPath offers a variety of features such as;
+
+- The ability to emplace directories and save the old directory to be able to restore it later on
+  - This allows you to traverse it without having to use recursion or a custom stack (via a linked list or similar) allowing infinite traversal (within limits of RAM)
+  - While TinyDir offers emplacing it won't store the old one and you can't restore it this makes recursing using it limited and requires some external stack or queue.
+  - Cute files offers no such feature
+- The ability to cache files and refer to them by number and then custom sort them
+  - Cute files offers no such feature
+  - TinyDir offers the ability to cache them but not custom sort you also can't refresh the cache
+- Fully C++ Bindings in a familiar style including operators for paths
+- The ability to concatenate paths together and compare them in an easy way
+  - Paths seem to be fully exempt from the other libraries except as just a 'string'
+- Really efficient 'open file' (that is get information about a file from a path)
+  - Only requires a single system call in most cases
+  - TinyDir has a similar function but it requires opening the parent directory and finding it from the iterator, this is very prone to races and is significantly slower requiring a lot more syscalls
+    - Up to O(n) minimum system calls
+  - Cute files offers no such feature
+- Extensive tests for all features
+  - Cute files has a lot of functions marked with 'not tested' making it potentially highly unstable
+  - TinyDir has few tests that test edge cases or performance but all around good coverage
+- You can output file sizes using multiple different byte size representations
+  - intervals of 1024 IEC (KiB, GiB, ...), JEDEC (KB, GB, ...)
+  - and intervals of 1000 both in normal (kB, GB, ...) and upper/lower
+  - you can also change the word `bytes` and force it to be always a word or just `B` independent of above.
+  - Both tinydir and cute files offers no feature like this
+- In my opinion it also looks much nicer (especially cpp bindings) you can use a single function in a while loop to iterate and its very nice
+
+CPath however has a few 'cons';
+
+- It is much larger at around ~2k lines compared to TinyDir's 800 and Cute Files 500
+  - Cute files is much more bare bones (not a bad thing!) and results in smaller binaries
+  - You can disable the CPP bindings in CPath if you want to reduce the footprint by about 600 lines
+    - Just `#define NO_CPP_BINDINGS` before include
+- It requires some constant tables for it's suffix printing
+  - Only some small constant strings and I presume since the tables are pretty similar they'll be some optimisation or something.
+- It doesn't load `stat` automatically this is mainly for optimisation purposes as it is often not needed unless you need time information or size.  It'll load it automatically as needed if you use the functions to get time / size and you can load it yourself using `cpathGetFileInfo` (or `File::GetFileInfo` in cpp) if you wish.  I wouldn't call this a con but it is something that could be an inconvenience
+  - Both tinydir and cute files always load stats every time you get a file in unix
+    - TinyDir also loads it in windows every time you get a file
+    - Cutefiles also loads it again every time it is used for time/size
+
 ## Benchmarks
 
 > Model Name: MacBook Air

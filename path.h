@@ -531,7 +531,7 @@ cpath_offset_t cpathGetFileSize(cpath_file *file);
   Get the file size prefix
 */
 _CPATH_FUNC_
-const cpath_char_t *cpathGetFileSizePrefix(cpath_file *file, CPathByteRep rep);
+const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep);
 
 /*
   Get the file size in decimal form
@@ -1385,7 +1385,7 @@ double cpathGetFileSizeDec(cpath_file *file, int intervalSize) {
 }
 
 _CPATH_FUNC_
-const cpath_char_t *cpathGetFileSizePrefix(cpath_file *file, CPathByteRep rep) {
+const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep) {
   cpath_offset_t size = cpathGetFileSize(file);
   int word = (rep & BYTE_REP_LONG) == BYTE_REP_LONG;
   int byte_word = (rep & BYTE_REP_BYTE_WORD) == BYTE_REP_BYTE_WORD;
@@ -1694,8 +1694,8 @@ public:
     return internals::cpathGetFileSizeDec(&file, intervalSize);
   }
 
-  inline const RawChar *GetFileSizePrefix(ByteRep rep) {
-    return internals::cpathGetFileSizePrefix(&file, rep);
+  inline const RawChar *GetFileSizeSuffix(ByteRep rep) {
+    return internals::cpathGetFileSizeSuffix(&file, rep);
   }
 
   inline Path Path() const {
