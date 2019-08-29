@@ -40,15 +40,27 @@ I would like to put a thanks out to a lot of other similar libraries for giving 
 
 > Memory: 8 GB
 
-Resultant stats running the given shell file:
+This are the results from running the relevant shell files
 
-| Test        | User Time | System Time  | Total |
-| ------------- |-------------| -----|-------|
-| Python (os.walk) | 0.121s | 0.063s | 0.184s |
-| CPath (Recursion) | 0.012s | 0.031s | 0.043s |
-| CPath (Stack) | 0.013s | 0.035s | 0.048s |
-| `tree` | 0.183s | 0.139s | 0.322s |
-| `find` | 0.013s | 0.058s | 0.071s |
+I also compared against other currently available file systems using their supplied method of traversal or one that would match the closest to what the examples showed.  To try not to give them a disadvantage in speed.
+
+> Note: If you feel that I somehow wrote these scripts inefficiently please submit a PR with fixes and I'll run the benchmarks.  Eventually we'll run these benchmarks on multiple machines (eventually) but for now it's easier to just not.
+
+### Recursive vs Stack through a large directory system
+
+> This test takes a while to run since creating the files can take a while and we are running a 100 tests to get a reasonable average.  Note: I sorted the list after creation.
+
+| Test                     | User   | System | Total  |
+| ------------------------ | ------ | ------ | ------ |
+| CPath (Recursion in C)   | 0.020s | 0.064s | 0.084s |
+| CPath (Recursive in cpp) | 0.023s | 0.064s | 0.088s |
+| CPath (Emplace in C)     | 0.021s | 0.072s | 0.093s |
+| CPath (Emplace in cpp)   | 0.030s | 0.071s | 0.101s |
+| find                     | 0.020s | 0.117s | 0.137s |
+| Python (os.walk)         | 0.158s | 0.081s | 0.240s |
+| Cute Files               | 0.041s | 0.241s | 0.281s |
+| TinyDir                  | 0.050s | 0.238s | 0.288s |
+| tree                     | 0.351s | 0.233s | 0.584s |
 
 Observations
 
@@ -56,3 +68,5 @@ Observations
 - Yes this does show that CPath is faster than `find` which I'm quite proud of
   - The user time is the same which is not that surprising since they both are written in C
   - The system time is different indicating I do less syscalls
+- Interestingly enough python beats both of the other libraries, I guess this comes to show that writing good code is all about optimising the bottle necks!  Even though the user time is around 4-5x faster (still not amazing since mine runs about 8-10x faster) it is absolutely hammered by the system time being around 3x slower there.  And since that is a bottle neck it results in the whole system running signifincantly slower.
+- Emplace in general seems slower and cpp does seem to suffer a minor performance cost but both of these are extremely minor and highly variable that I don't think I'll look into it too much.

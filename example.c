@@ -1,5 +1,3 @@
-#define UNICODE
-
 #include "path.h"
 
 #include <stdio.h>

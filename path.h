@@ -151,8 +151,6 @@ extern "C" {
 
 /* Windows Unicode Support */
 #if defined _MSC_VER || defined __MINGW32__
-
-typedef TCHAR cpath_char_t;
 #define CPATH_STR(str) _TEXT(str)
 #define cpath_str_length _tcslen
 #define cpath_str_copy _tcscpy
@@ -160,10 +158,7 @@ typedef TCHAR cpath_char_t;
 #define cpath_str_concat _tcscat
 #define cpath_str_find_last_char _tcsrchr
 #define cpath_str_compare _tcsncmp
-
 #else
-
-typedef char cpath_char_t;
 #define CPATH_STR(str) str
 #define cpath_str_length strlen
 #define cpath_str_copy strcpy
@@ -171,16 +166,6 @@ typedef char cpath_char_t;
 #define cpath_str_concat strcat
 #define cpath_str_find_last_char strrchr
 #define cpath_str_compare strncmp
-
-#endif
-
-#if defined _MSC_VER || defined __MINGW32__
-// todo
-typedef cpath_offset_t;
-typedef cpath_time_t;
-#else
-typedef off_t cpath_offset_t;
-typedef time_t cpath_time_t;
 #endif
 
 #if defined _MSC_VER || defined __MINGW32__
@@ -253,17 +238,38 @@ typedef time_t cpath_time_t;
 
 #if !defined _MSC_VER
 #if defined __MINGW32__ && defined _UNICODE
-typedef _WDIR cpath_dirdata_t;
-typedef struct _wdirent cpath_dirent_t;
 #define _cpath_opendir _wopendir
 #define _cpath_readdir _wreaddir
 #define _cpath_closedir _wclosedir
 #else
-typedef DIR cpath_dirdata_t;
-typedef struct dirent cpath_dirent_t;
 #define _cpath_opendir opendir
 #define _cpath_readdir readdir
 #define _cpath_closedir closedir
+#endif
+#endif
+
+#if !defined CPATH_NO_CPP_BINDINGS && defined __cplusplus
+  namespace cpath { namespace internals {
+#endif
+
+#if defined _MSC_VER || defined __MINGW32__
+// todo
+typedef cpath_offset_t;
+typedef cpath_time_t;
+typedef TCHAR cpath_char_t;
+#else
+typedef char cpath_char_t;
+typedef off_t cpath_offset_t;
+typedef time_t cpath_time_t;
+#endif
+
+#if !defined _MSC_VER
+#if defined __MINGW32__ && defined _UNICODE
+typedef _WDIR cpath_dirdata_t;
+typedef struct _wdirent cpath_dirent_t;
+#else
+typedef DIR cpath_dirdata_t;
+typedef struct dirent cpath_dirent_t;
 #endif
 #endif
 
@@ -315,9 +321,9 @@ typedef struct cpath_dir_t {
   cpath path;
 } cpath_dir;
 
-typedef int CPathByteRep;
-
-enum {
+// This allows a forced type
+typedef uint8_t CPathByteRep;
+enum CPathByteRep_ {
   BYTE_REP_JEDEC          = 0,  // KB = 1024, ...
   BYTE_REP_DECIMAL        = 1,  // 1000 interval segments, B, kB, MB, GB, ...
   BYTE_REP_IEC            = 2,  // KiB = 1024, ...
@@ -576,6 +582,16 @@ void cpathCopy(cpath *out, const cpath *in) {
 }
 
 #define CPATH_CONCAT_LIT(path, other) cpathConcatStr(path, CPATH_STR(other))
+
+_CPATH_FUNC_
+int cpathFromStr(cpath *out, const cpath_char_t *str) {
+  size_t len = cpath_str_length(str);
+  if (len >= CPATH_MAX_PATH_LEN) return 0;
+
+  out->len = len;
+  cpath_strn_copy(out->buf, str, len);
+  return 1;
+}
 
 _CPATH_FUNC_
 int cpathConcatStrn(cpath *out, const cpath_char_t *other, size_t len) {
@@ -1409,4 +1425,441 @@ const cpath_char_t *cpathGetFileSizePrefix(cpath_file *file, CPathByteRep rep) {
 #endif
 #ifdef __cplusplus
 }
+#ifndef CPATH_NO_CPP_BINDINGS
+  } }
+
+// cpp bindings
+namespace cpath {
+// using is a C++11 extension, we want to remain pretty
+// compatible to all versions
+typedef internals::cpath_time_t     Time;
+typedef internals::cpath_offset_t   Offset;
+typedef internals::cpath_char_t     RawChar;
+typedef internals::cpath            RawPath;
+typedef internals::cpath_dir        RawDir;
+typedef internals::cpath_file       RawFile;
+typedef internals::CPathByteRep     ByteRep;
+
+/*
+  This has to be kept to date with the other representation
+  Kinda disgusting but seems to be the best way to ensure encapsulation
+*/
+const ByteRep BYTE_REP_JEDEC          = internals::BYTE_REP_JEDEC;
+const ByteRep BYTE_REP_DECIMAL        = internals::BYTE_REP_DECIMAL;
+const ByteRep BYTE_REP_IEC            = internals::BYTE_REP_IEC;
+const ByteRep BYTE_REP_DECIMAL_UPPER  = internals::BYTE_REP_DECIMAL_UPPER;
+const ByteRep BYTE_REP_DECIMAL_LOWER  = internals::BYTE_REP_DECIMAL_LOWER;
+const ByteRep BYTE_REP_LONG           = internals::BYTE_REP_LONG;
+const ByteRep BYTE_REP_BYTE_WORD      = internals::BYTE_REP_BYTE_WORD;
+
+#if !defined _MSC_VER
+#if defined __MINGW32__
+typedef struct _stat RawStat;
+#else
+typedef struct stat RawStat;
+#endif
+#endif
+
+template<typename T, typename Err>
+struct Opt {
+private:
+#if __cplusplus <= 199711L
+  struct Data {
+#else
+  union Data {
+#endif
+  T raw;
+  Err err;
+
+  Data(T raw) : raw(raw) {}
+  Data(Err err) : err(err) {}
+} data;
+  bool ok;
+
+public:
+  Opt(T raw) : data(raw), ok(true) {}
+  Opt(Err err) : data(err), ok(false) {}
+  Opt() : data(Err()), ok(false) {}
+
+  bool IsOk() const {
+    return ok;
+  }
+
+  operator bool() const {
+    return ok;
+  }
+
+  T *operator*() {
+    if (!ok) return NULL;
+    return &data.raw;
+  }
+
+  T *operator->() {
+    if (!ok) return NULL;
+    return &data.raw;
+  }
+};
+
+struct Error {
+  enum Type {
+    UNKNOWN,
+    INVALID_ARGUMENTS,
+    NAME_TOO_LONG,
+    NO_SUCH_FILE,
+    IO_ERROR,
+  };
+
+  static Type FromErrno() {
+    switch (errno) {
+      case EINVAL: return INVALID_ARGUMENTS;
+      case ENAMETOOLONG: return NAME_TOO_LONG;
+      case ENOENT: return NO_SUCH_FILE;
+      case EIO: return IO_ERROR;
+      default: return UNKNOWN;
+    }
+  }
+};
+
+struct Path {
+private:
+  RawPath path;
+
+public:
+  inline Path(const char *str) : path(internals::cpathFromUtf8(str)) { }
+
+#if CPATH_UNICODE
+  inline Path(RawChar *str) {
+    internals::cpathFromStr(&path, str);
+  }
+#endif
+
+  inline Path() {
+    path.len = 0;
+    path.buf[0] = '\0';
+  }
+
+  inline Path(RawPath path) : path(path) {}
+
+  static inline Path GetCwd() {
+    return Path(internals::cpathGetCwd());
+  }
+
+  inline bool Exists() const {
+    return internals::cpathExists(&path);
+  }
+
+  inline const RawChar *GetBuffer() const {
+    return path.buf;
+  }
+
+  inline const RawPath *GetRawPath() const {
+    return &path;
+  }
+
+  inline unsigned long Size() const {
+    return path.len;
+  }
+
+  inline friend bool operator==(const Path &p1, const Path &p2) {
+    if (p1.path.len != p2.path.len) return false;
+    return !cpath_str_compare(p1.path.buf, p2.path.buf, p1.path.len);
+  }
+
+  inline friend bool operator!=(const Path &p1, const Path &p2) {
+    return !(p1 == p2);
+  }
+
+  inline Path &operator/=(const Path &other) {
+    internals::cpathConcat(&path, &other.path);
+    return *this;
+  }
+
+  inline Path &operator/=(const RawChar *str) {
+    internals::cpathConcatStr(&path, str);
+    return *this;
+  }
+
+#if CPATH_UNICODE
+  inline Path &operator/=(const char *str) {
+    internals::cpathConcatStr(&path, str);
+    return *this;
+  }
+#endif
+
+  inline friend Path operator/(Path lhs, const Path &rhs) {
+    lhs /= rhs;
+    return lhs;
+  }
+
+  inline friend Path operator/(Path lhs, const char *&rhs) {
+    lhs /= rhs;
+    return lhs;
+  }
+
+#if CPATH_UNICODE
+  inline friend Path operator/(Path lhs, const RawChar *&rhs) {
+    lhs /= rhs;
+    return lhs;
+  }
+#endif
+};
+
+struct File {
+private:
+  RawFile file;
+  bool hasArg;
+
+public:
+  inline bool LoadFileInfo() {
+    return internals::cpathGetFileInfo(&file);
+  }
+
+  inline bool LoadFlags(struct Dir &dir, void *data);
+
+  inline RawFile *GetRawFile() {
+    return &file;
+  }
+
+  inline const RawFile *GetRawFileConst() const {
+    return &file;
+  }
+
+  inline File(RawFile file) : file(file), hasArg(true) {}
+  inline File() : hasArg(false) {}
+
+  inline static Opt<File, Error::Type> OpenFile(const Path &path) {
+    RawFile file;
+    if (!internals::cpathOpenFile(&file, path.GetRawPath())) {
+      return Error::FromErrno();
+    } else {
+      return File(file);
+    }
+  }
+
+  inline Opt<Dir, Error::Type> ToDir() const;
+
+  inline bool IsSpecialHardLink() const {
+    if (!hasArg) {
+      errno = EINVAL;
+      return false;
+    }
+    return internals::cpathFileIsSpecialHardLink(&file);
+  }
+
+  inline bool IsDir() const {
+    if (!hasArg) {
+      errno = EINVAL;
+      return false;
+    }
+    return file.isDir;
+  }
+
+  inline bool IsReg() const {
+    if (!hasArg) {
+      errno = EINVAL;
+      return false;
+    }
+    return file.isReg;
+  }
+
+  inline bool IsSym() const {
+    if (!hasArg) {
+      errno = EINVAL;
+      return false;
+    }
+    return file.isSym;
+  }
+
+  inline const RawChar *Extension() {
+    if (internals::cpathGetExtension(&file)) {
+      return file.extension;
+    } else {
+      return NULL;
+    }
+  }
+
+  inline Time GetLastAccess() {
+    return internals::cpathGetLastAccess(&file);
+  }
+
+  inline Time GetLastModification() {
+    return internals::cpathGetLastModification(&file);
+  }
+
+  inline Time GetFileSize() {
+    return internals::cpathGetFileSize(&file);
+  }
+
+  inline double GetFileSizeDec(int intervalSize) {
+    return internals::cpathGetFileSizeDec(&file, intervalSize);
+  }
+
+  inline const RawChar *GetFileSizePrefix(ByteRep rep) {
+    return internals::cpathGetFileSizePrefix(&file, rep);
+  }
+
+  inline Path Path() const {
+    return cpath::Path(file.path);
+  }
+
+  inline const RawChar *Name() {
+    return file.name;
+  }
+
+#if !defined _MSC_VER
+#if defined __MINGW32__
+  inline RawStat Stat() {
+    if (!file.statLoaded) internals::cpathGetFileInfo(&file);
+    return file.stat;
+  }
+#else
+  inline RawStat Stat() {
+    if (!file.statLoaded) internals::cpathGetFileInfo(&file);
+    return file.stat;
+  }
+#endif
+#endif
+};
+
+struct Dir {
+private:
+  RawDir dir;
+  bool loadedFiles;
+
+public:
+  inline Dir(const Path &path) {
+    loadedFiles = false;
+    internals::cpathOpenDir(&dir, path.GetRawPath());
+  }
+  inline Dir(RawDir dir) : dir(dir) {
+    loadedFiles = false;
+  }
+  inline Dir() {
+    loadedFiles = false;
+    internals::cpathOpenDir(&dir, Path().GetRawPath());
+  }
+
+  inline static Opt<Dir, Error::Type> Open(const File &file) {
+    RawDir dir;
+    internals::cpathFileToDir(&dir, file.GetRawFileConst());
+    return Dir(dir);
+  }
+
+  inline bool OpenEmplace(const Path &path) {
+    internals::cpathCloseDir(&dir);
+    loadedFiles = false;
+    return internals::cpathOpenDir(&dir, path.GetRawPath());
+  }
+
+  inline void Close() {
+    return internals::cpathCloseDir(&dir);
+  }
+
+  inline void Sort(internals::cpath_cmp cmp) {
+    loadedFiles = true; // will load files as required
+    internals::cpathSort(&dir, cmp);
+  }
+
+  inline bool MoveNext() {
+    return internals::cpathMoveNextFile(&dir);
+  }
+
+  inline RawDir *GetRawDir() {
+    return &dir;
+  }
+
+  inline Opt<File, Error::Type> PeekNextFile() {
+    RawFile file;
+    if (!internals::cpathPeekNextFile(&dir, &file)) {
+      return Error::FromErrno();
+    } else {
+      return File(file);
+    }
+  }
+
+  inline Opt<File, Error::Type> GetNextFile() {
+    RawFile file;
+    if (!internals::cpathGetNextFile(&dir, &file)) {
+      return Error::FromErrno();
+    } else {
+      return File(file);
+    }
+  }
+
+  inline bool LoadFiles() {
+    loadedFiles = true;
+    return internals::cpathLoadAllFiles(&dir);
+  }
+
+  inline unsigned long Size() {
+    if (!loadedFiles && !LoadFiles()) return 0;
+    return dir.size;
+  }
+
+  inline Opt<File, Error::Type> GetFile(unsigned long n) {
+    RawFile file;
+    if (!internals::cpathGetFile(&dir, &file, n)) {
+      return Error::FromErrno();
+    } else {
+      return File(file);
+    }
+  }
+
+  inline bool OpenSubFileEmplace(const File &file, bool saveDir) {
+    loadedFiles = false;
+    return internals::cpathOpenSubFileEmplace(&dir, file.GetRawFileConst(), saveDir);
+  }
+
+  inline bool OpenSubDirEmplace(unsigned int n, bool saveDir) {
+    loadedFiles = false;
+    return internals::cpathOpenSubDirEmplace(&dir, n, saveDir);
+  }
+
+  inline Opt<Dir, Error::Type> OpenSubDir(unsigned int n) {
+    RawDir raw;
+    if (!internals::cpathOpenSubDir(&raw, &dir, n)) {
+      return Error::FromErrno();
+    } else {
+      return Dir(raw);
+    }
+  }
+
+  inline Dir OpenNextSubDir() {
+    RawDir raw;
+    internals::cpathOpenNextSubDir(&raw, &dir);
+    return Dir(raw);
+  }
+
+  inline Dir OpenCurrentSubDir() {
+    RawDir raw;
+    internals::cpathOpenCurrentSubDir(&raw, &dir);
+    return Dir(raw);
+  }
+
+  inline bool OpenNextSubDirEmplace(bool saveDir) {
+    loadedFiles = false;
+    return internals::cpathOpenNextSubDirEmplace(&dir, saveDir);
+  }
+
+  inline bool OpenCurrentSubDirEmplace(bool saveDir) {
+    loadedFiles = false;
+    return internals::cpathOpenCurrentSubDirEmplace(&dir, saveDir);
+  }
+
+  inline bool RevertEmplace() {
+    return internals::cpathRevertEmplaceCopy(&dir);
+  }
+};
+
+bool File::LoadFlags(struct Dir &dir, void *data) {
+  return internals::cpathLoadFlags(dir.GetRawDir(), &file, data);
+}
+
+Opt<Dir, Error::Type> File::ToDir() const {
+  return Dir::Open(*this);
+}
+
+}
+
+#endif
 #endif
