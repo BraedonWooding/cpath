@@ -157,7 +157,8 @@ extern "C" {
 #define cpath_strn_copy _tcsncpy
 #define cpath_str_concat _tcscat
 #define cpath_str_find_last_char _tcsrchr
-#define cpath_str_compare _tcsncmp
+#define cpath_str_compare _tcscmp
+#define cpath_str_compare_safe _tcsncmp
 #else
 #define CPATH_STR(str) str
 #define cpath_str_length strlen
@@ -165,7 +166,8 @@ extern "C" {
 #define cpath_strn_copy strncpy
 #define cpath_str_concat strcat
 #define cpath_str_find_last_char strrchr
-#define cpath_str_compare strncmp
+#define cpath_str_compare strcmp
+#define cpath_str_compare_safe strncmp
 #endif
 
 #if defined _MSC_VER || defined __MINGW32__
@@ -545,6 +547,8 @@ const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep);
 _CPATH_FUNC_
 double cpathGetFileSizeDec(cpath_file *file, int interval);
 
+_CPATH_FUNC_
+void cpathWriteCwd(cpath *path);
 /* == Definitions == */
 
 /* == Path == */
@@ -582,7 +586,7 @@ cpath cpathFromUtf8(const char *str) {
   mbstowcs_s(&path.len, path.buf, len + 1, str, CPATH_MAX_PATH_LEN);
 #else
   // this is slightly cheaper since it won't keep going till the end of buffer
-  cpath_strn_copy(path.buf, str, len);
+  cpath_strn_copy(path.buf, str, len + 1);
 #endif
   path.len = len;
   cpathTrim(&path);
@@ -657,6 +661,59 @@ int cpathExists(const cpath *path) {
   */
   return access(path->buf, F_OK) != -1;
 #endif
+}
+
+// attempts to canonicalise without file system help
+_CPATH_FUNC_
+int cpathCanonicaliseFake(cpath *path) {
+  if (path == NULL) {
+    errno = EINVAL;
+    return 0;
+  }
+
+  cpath buf;
+  buf.len = 0;
+  cpath_char_t *chr = &path->buf[0];
+  while (*chr != '\0') {
+    if (*chr == CPATH_STR('.')) {
+      if (chr[1] == CPATH_STR('.')) {
+        if (buf.len == 0) {
+          // no directory to go back based on string alone
+          errno = ENOENT;
+          return 0;
+        }
+        // remove last directory ignoring the last `/` since that is part of ..
+        buf.len--;
+        while (buf.len > 0 && buf.buf[buf.len - 1] != CPATH_STR('/') &&
+               buf.buf[buf.len - 1] != CPATH_STR('\\')) {
+          buf.len--;
+        }
+        // skip twice
+        chr++;
+        chr++;
+      } else if (chr[1] == CPATH_STR('/') || chr[1] == '\0' ||
+                 chr[1] == CPATH_STR('\\')) {
+        // skip
+        chr++;
+      } else {
+        buf.buf[buf.len++] = *chr;
+      }
+    } else {
+      buf.buf[buf.len++] = *chr;
+    }
+    chr++;
+  }
+
+  buf.buf[buf.len] = '\0';
+  cpathCopy(path, &buf);
+  cpathTrim(path);
+  if (path->len == 0) {
+    path->buf[0] = '.';
+    path->buf[1] = '\0';
+    path->len = 1;
+  }
+
+  return 1;
 }
 
 _CPATH_FUNC_
@@ -1635,7 +1692,7 @@ public:
 
   inline friend bool operator==(const Path &p1, const Path &p2) {
     if (p1.path.len != p2.path.len) return false;
-    return !cpath_str_compare(p1.path.buf, p2.path.buf, p1.path.len);
+    return !cpath_str_compare_safe(p1.path.buf, p2.path.buf, p1.path.len);
   }
 
   inline friend bool operator!=(const Path &p1, const Path &p2) {
