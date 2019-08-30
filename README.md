@@ -16,6 +16,17 @@ I also felt that the code was quite obfuscated for some and it felt like they ov
 
 I chose to make this very young i.e. C89/C99 ish since I was already going quite far with making it work with all versions of C++.
 
+## What this aims to be and what it doesn't aim to be
+
+- A simple and straightforward lite filesystem.
+- The ability to create abstract paths and canonicalise them into real ones
+- Very lite cpp bindings for C++ pre 17 (does include operators however)
+- Meant to be highly extensible by the user so everything is exposed
+- NOT make any overarching architectural designs that could pollute the user's paradigm
+- NOT a replacement for a more heavy duty library like `std::filesystem`
+- NOT to dictate anything to do with opening/handling files
+- NOT to dictate anything to do with stuff like watching files or creating files
+
 ## Credits
 
 I would like to put a thanks out to a lot of other similar libraries for giving me some source to compare against to make sure I was using the APIs correctly and some ideas for how to structure my API.
