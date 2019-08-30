@@ -274,6 +274,7 @@ typedef struct dirent cpath_dirent_t;
 #endif
 
 typedef cpath_char_t *cpath_str;
+typedef int(*cpath_err_handler)();
 typedef int(*cpath_cmp)(const void*, const void*);
 typedef struct cpath_t {
   cpath_char_t buf[CPATH_MAX_PATH_LEN];
@@ -334,6 +335,11 @@ enum CPathByteRep_ {
   BYTE_REP_LONG           = 0b10000000, // Represent as words i.e. kibibytes
   BYTE_REP_BYTE_WORD      = 0b01000000, // Just `B` as `Byte` (only bytes)
 };
+
+typedef void(*cpath_traverse_it)(
+  cpath_file *file, cpath_dir *parent, int depth,
+  void *data
+);
 
 /* == Declarations == */
 
@@ -556,6 +562,14 @@ void cpathTrim(cpath *path) {
 _CPATH_FUNC_
 cpath cpathFromUtf8(const char *str) {
   cpath path;
+  if (str[0] == '\0') {
+    // empty string which is just '.'
+    path.len = 1;
+    path.buf[0] = CPATH_STR('.');
+    path.buf[1] = '\0';
+    return path;
+  }
+
   path.len = 0;
   path.buf[0] = '\0';
   size_t len = cpath_str_length(str);
@@ -587,6 +601,12 @@ _CPATH_FUNC_
 int cpathFromStr(cpath *out, const cpath_char_t *str) {
   size_t len = cpath_str_length(str);
   if (len >= CPATH_MAX_PATH_LEN) return 0;
+  if (len == 0) {
+    out->len = 1;
+    out->buf[0] = CPATH_STR('.');
+    out->buf[1] = '\0';
+    return 1;
+  }
 
   out->len = len;
   cpath_strn_copy(out->buf, str, len);
@@ -1422,6 +1442,34 @@ const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep) {
   }
 }
 
+_CPATH_FUNC_
+void cpath_traverse(
+  cpath_dir *dir, int depth, int visit_subdirs, cpath_err_handler err,
+  cpath_traverse_it it, void *data
+) {
+  // currently implemented recursively
+  if (dir == NULL) {
+    errno = EINVAL;
+    if (err != NULL) err();
+    return;
+  }
+  cpath_file file;
+  while (cpathGetNextFile(dir, &file)) {
+    if (it != NULL) {
+      it(&file, dir, depth, data);
+    }
+    if (file.isDir && visit_subdirs && !cpathFileIsSpecialHardLink(&file)) {
+      cpath_dir tmp;
+      if (!cpathFileToDir(&tmp, &file)) {
+        if (err) err();
+        continue;
+      }
+      cpath_traverse(&tmp, depth + 1, visit_subdirs, err, it, data);
+      cpathCloseDir(&tmp);
+    }
+  }
+}
+
 #endif
 #ifdef __cplusplus
 }
@@ -1439,6 +1487,12 @@ typedef internals::cpath            RawPath;
 typedef internals::cpath_dir        RawDir;
 typedef internals::cpath_file       RawFile;
 typedef internals::CPathByteRep     ByteRep;
+
+typedef void(*TraversalIt)(
+  struct File &file, struct Dir &parent, int depth, void *data
+);
+
+typedef void(*ErrorHandler)();
 
 /*
   This has to be kept to date with the other representation
@@ -1489,6 +1543,14 @@ public:
     return ok;
   }
 
+  Err GetErr() const {
+    return data.err;
+  }
+
+  T GetRaw() const {
+    return data.raw;
+  }
+
   T *operator*() {
     if (!ok) return NULL;
     return &data.raw;
@@ -1518,6 +1580,16 @@ struct Error {
       default: return UNKNOWN;
     }
   }
+
+  static void WriteToErrno(Type type) {
+    switch (type) {
+      case INVALID_ARGUMENTS: errno = EINVAL;
+      case NAME_TOO_LONG: errno = ENAMETOOLONG;
+      case NO_SUCH_FILE: errno = ENOENT;
+      case IO_ERROR: errno = IO_ERROR;
+      default: errno = 0;
+    }
+  }
 };
 
 struct Path {
@@ -1534,8 +1606,9 @@ public:
 #endif
 
   inline Path() {
-    path.len = 0;
-    path.buf[0] = '\0';
+    path.len = 1;
+    path.buf[0] = CPATH_STR('.');
+    path.buf[1] = '\0';
   }
 
   inline Path(RawPath path) : path(path) {}
@@ -1743,6 +1816,29 @@ public:
     RawDir dir;
     internals::cpathFileToDir(&dir, file.GetRawFileConst());
     return Dir(dir);
+  }
+
+  inline void Traverse(TraversalIt it, ErrorHandler err, int visitSubDir,
+                       int depth, void *data) {
+    while (Opt<File, Error::Type> file = GetNextFile()) {
+      if (file && it) it(**file, *this, depth, data);
+      if (!file) {
+        Error::WriteToErrno(file.GetErr());
+        if (err) err();
+        continue;
+      }
+
+      if (file->IsDir() && !file->IsSpecialHardLink()) {
+        Opt<Dir, Error::Type> dir = file->ToDir();
+        if (!dir) {
+          Error::WriteToErrno(dir.GetErr());
+          if (err) err();
+          continue;
+        }
+        dir->Traverse(it, err, visitSubDir, depth + 1, data);
+        dir->Close();
+      }
+    }
   }
 
   inline bool OpenEmplace(const Path &path) {

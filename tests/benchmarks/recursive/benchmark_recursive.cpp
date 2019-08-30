@@ -17,7 +17,8 @@ void recursive_visit(Dir &dir, int tab) {
 }
 
 int main(void) {
-  Path cwd = Path(".");
+  // an empty path is always `.`
+  Path cwd = Path();
   Dir dir = Dir(cwd);
   recursive_visit(dir, 0);
 }

@@ -65,6 +65,13 @@ void emplace(cpath_dir *dir) {
     }
 }
 
+void for_file(cpath_file *file, cpath_dir *parent, int tab, void *_) {
+    for (int i = 0; i < tab; i++) putchar('\t');
+    CPathByteRep flags = BYTE_REP_JEDEC | BYTE_REP_BYTE_WORD;
+    printf("[%c] %s %.1lf %s\n", (file->isDir ? 'D' : 'F'), file->name,
+        cpathGetFileSizeDec(file, 1024), cpathGetFileSizeSuffix(file, flags));
+}
+
 void paths_example() {
     // casts are automatic and should be crossplatform
     // if you want to make it truly unicode independent and its a literal
@@ -94,9 +101,10 @@ int main(void) {
     cpath_dir dir;
     cpath path = cpathGetCwd();
     cpathOpenDir(&dir, &path);
-    recursive_visit(&dir, 0);
+    // recursive_visit(&dir, 0);
     paths_example();
-    emplace(&dir);
+    // emplace(&dir);
+    cpath_traverse(&dir, 0, 1, NULL, for_file, NULL);
 
     cpath_file file;
     CPATH_CONCAT_LIT(&path, "a.out");
