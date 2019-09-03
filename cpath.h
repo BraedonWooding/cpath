@@ -448,6 +448,49 @@ int cpathCanonicaliseAvoidSysCall(cpath *out, cpath *path);
 _CPATH_FUNC_
 void cpathClear(cpath *path);
 
+/*
+  Iterate through every component.  Doesn't include the \
+  i.e. \usr\local\bin\myfile.so will be '' 'usr' 'local' 'bin' 'myfile.so'
+
+  If you wish to iterate from the beginning set index to 0.  Else set index
+  to whatever index you wish to iterate from.  It'll restore the previous
+  segments as it goes meaning on completion the path will be fully restored.
+
+  NOTE: Modifies the path buffer so you shouldn't use the path for anything
+        Until this returns NULL (indicating no more path segments)
+        OR you use cpathItRefRestore() note that on the last path segment
+        it obviously won't have to add an '\0' so it'll also work if you bail
+        out then.  It is hard to detect that though.
+
+  You can strdup it yourself or do a memcpy if you care about editing it
+*/
+_CPATH_FUNC_
+const cpath_char_t *cpathItRef(cpath *path, int *index);
+
+/*
+  Restores the path to a usable state.
+  ONLY needs to be called if the path is wanted to be usable and you haven't
+       iterated through all the references.
+  If the index isn't valid it'll cycle through the path fixing it up.
+  This is just for the sake of it, it'll make things easier and less prone
+  to breaking.
+
+  Do note that this will update index so that you can use it again with
+  it ref to get the resumed behaviour you would expect (effectively just a ++)
+*/
+_CPATH_FUNC_
+void cpathItRefRestore(cpath *path, int *index);
+
+/*
+  Go up a directory effectively going back by one /
+  i.e. C:/D/E/F/g.c => C:/D/E/F and so on...
+  Returns true if it succeeded
+  Could possibly involve a canonicalise if the path is a symlink
+  i.e. ./ has to be resolved and so does ~/
+*/
+_CPATH_FUNC_
+int cpathUpDir(cpath *path);
+
 /* == File System == */
 
 /*
@@ -697,26 +740,29 @@ const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep);
 _CPATH_FUNC_
 void cpathTrim(cpath *path) {
   /* trim all the terminating / and \ */
-  while (path->buf[path->len - 1] == CPATH_STR('/') ||
-         path->buf[path->len - 1] == CPATH_STR('\\')) {
-    path->buf[path->len - 1] = '\0';
+  /* We don't want to trim // into empty string
+     We will trim it to just /
+   */
+  while (path->len > 1 && (path->buf[path->len - 1] == CPATH_STR('/') ||
+         path->buf[path->len - 1] == CPATH_STR('\\'))) {
     path->len--;
   }
+  path->buf[path->len] = CPATH_STR('\0');
 }
 
 _CPATH_FUNC_
 cpath cpathFromUtf8(const char *str) {
   cpath path;
-  if (str[0] == '\0') {
+  if (str[0] == CPATH_STR('\0')) {
     // empty string which is just '.'
     path.len = 1;
     path.buf[0] = CPATH_STR('.');
-    path.buf[1] = '\0';
+    path.buf[1] = CPATH_STR('\0');
     return path;
   }
 
   path.len = 0;
-  path.buf[0] = '\0';
+  path.buf[0] = CPATH_STR('\0');
   size_t len = cpath_str_length(str);
   // NOTE: max path len includes the \0 where as str length doesn't!
   if (len >= CPATH_MAX_PATH_LEN) {
@@ -747,7 +793,7 @@ int cpathFromStr(cpath *out, const cpath_char_t *str) {
   if (len == 0) {
     out->len = 1;
     out->buf[0] = CPATH_STR('.');
-    out->buf[1] = '\0';
+    out->buf[1] = CPATH_STR('\0');
     return 1;
   }
 
@@ -759,14 +805,14 @@ int cpathFromStr(cpath *out, const cpath_char_t *str) {
 _CPATH_FUNC_
 int cpathConcatStrn(cpath *out, const cpath_char_t *other, size_t len) {
   if (len + out->len >= CPATH_MAX_PATH_LEN) {
-    // path too long, >= cause max path includes '\0'
+    // path too long, >= cause max path includes CPATH_STR('\0')
     errno = ENAMETOOLONG;
     return 0;
   }
 
   if (other[0] != CPATH_STR('/') && out->buf[out->len - 1] != CPATH_STR('/')) {
-    out->buf[out->len++] = '/';
-    out->buf[out->len] = '\0';
+    out->buf[out->len++] = CPATH_STR('/');
+    out->buf[out->len] = CPATH_STR('\0');
   }
 
   cpath_str_concat(out->buf, other);
@@ -816,7 +862,7 @@ int cpathCanonicaliseNoSysCall(cpath *out, cpath *path) {
   out->len = 0;
 
   cpath_char_t *chr = &path->buf[0];
-  while (*chr != '\0') {
+  while (*chr != CPATH_STR('\0')) {
     if (*chr == CPATH_STR('.')) {
       if (chr[1] == CPATH_STR('.')) {
         if (out->len == 0) {
@@ -833,7 +879,7 @@ int cpathCanonicaliseNoSysCall(cpath *out, cpath *path) {
         // skip twice
         chr++;
         chr++;
-      } else if (chr[1] == CPATH_STR('/') || chr[1] == '\0' ||
+      } else if (chr[1] == CPATH_STR('/') || chr[1] == CPATH_STR('\0') ||
                  chr[1] == CPATH_STR('\\')) {
         // skip
         chr++;
@@ -846,11 +892,11 @@ int cpathCanonicaliseNoSysCall(cpath *out, cpath *path) {
     chr++;
   }
 
-  out->buf[out->len] = '\0';
+  out->buf[out->len] = CPATH_STR('\0');
   cpathTrim(out);
   if (out->len == 0) {
-    out->buf[0] = '.';
-    out->buf[1] = '\0';
+    out->buf[0] = CPATH_STR('.');
+    out->buf[1] = CPATH_STR('\0');
     out->len = 1;
   }
 
@@ -894,9 +940,83 @@ int cpathCanonicaliseAvoidSysCall(cpath *out, cpath *path) {
 
 _CPATH_FUNC_
 void cpathClear(cpath *path) {
-  path->buf[0] = '.';
-  path->buf[1] = '\0';
+  path->buf[0] = CPATH_STR('.');
+  path->buf[1] = CPATH_STR('\0');
   path->len = 1;
+}
+
+_CPATH_FUNC_
+const cpath_char_t *cpathItRef(cpath *path, int *index) {
+  if (path == NULL || index == NULL || *index >= path->len || *index < 0) {
+    return NULL;
+  }
+
+  if (path->buf[*index] == CPATH_STR('\0')) {
+    path->buf[*index] = CPATH_STR('/');
+    (*index)++;
+  }
+  int old_pos = *index;
+
+  // find next '/'
+  while (*index < path->len && path->buf[*index] != CPATH_STR('/') &&
+         path->buf[*index] != CPATH_STR('\\')) {
+    (*index)++;
+  }
+
+  path->buf[*index] = '\0';
+
+  return &path->buf[old_pos];
+}
+
+_CPATH_FUNC_
+void cpathItRefRestore(cpath *path, int *index) {
+  if (path == NULL) return;
+
+  if (index == NULL || *index < 0 || *index >= path->len ||
+      path->buf[*index] != CPATH_STR('\0')) {
+    // we have to loop
+    for (int i = 0; i < path->len; i++) {
+      if (path->buf[i] == CPATH_STR('\0')) path->buf[i] = CPATH_STR('/');
+    }
+    // set index to the length since we have no real way to determine
+    // where abouts it its (that is if it isn't null)
+    if (index != NULL) *index = path->len;
+  } else {
+    path->buf[*index] = CPATH_STR('/');
+    (*index)++;
+  }
+}
+
+_CPATH_FUNC_
+int cpathUpDir(cpath *path) {
+  if (path->len == 0) {
+    // shouldn't have a path with this length
+    errno = EINVAL;
+    return 0;
+  }
+
+  // We have to find the last component and strip it
+  int oldLen = path->len;
+  while (path->len > 1 && path->buf[path->len - 1] != CPATH_STR('/') &&
+         path->buf[path->len - 1] != CPATH_STR('/')) {
+    path->len--;
+  }
+  if (path->len == 1) {
+    // we failed to quickly go up a dir
+    // so we will have to restore len and try another method
+    // this is better than the avoid method because
+    // this will allow you to go up a directory if the path == PATH_MAX
+    path->len = oldLen;
+    if (!CPATH_CONCAT_LIT(path, "..")) {
+      return 0;
+    }
+    return cpathCanonicalise(path, path);
+  }
+
+  // we have found a '/' so we just set it to '\0'
+  path->buf[path->len - 1] = '\0';
+  path->len--;
+  return 1;
 }
 
 /* == File System == */
@@ -1179,13 +1299,20 @@ int cpathPeekNextFile(cpath_dir *dir, cpath_file *file) {
 
   cpath_str_copy(file->name, filename);
   cpathCopy(&file->path, &dir->path);
-  CPATH_CONCAT_LIT(&file->path, "/");
-  cpathConcatStr(&file->path, filename);
+  if (!CPATH_CONCAT_LIT(&file->path, "/") ||
+      !cpathConcatStr(&file->path, filename)) {
+    return 0;
+  }
+#ifndef CPATH_NO_AUTOLOAD_EXT
   cpathGetExtension(file);
+#endif
 #if defined _MSC_VER
-  cpathLoadFlags(dir, file, dir->fileData)
+  if (!cpathLoadFlags(dir, file, dir->fileData)) return 0;
 #else
-  cpathLoadFlags(dir, file, NULL);
+  if (!cpathLoadFlags(dir, file, NULL)) return 0;
+#endif
+#ifdef CPATH_AUTOLOAD_STAT
+  if (!cpathGetFileInfo(file)) return 0;
 #endif
   return 1;
 }
@@ -1211,8 +1338,8 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
 
 _CPATH_FUNC_
 int cpathFileIsSpecialHardLink(const cpath_file *file) {
-  return (file->name[0] == '.' && (file->name[1] == '\0' ||
-         (file->name[1] == '.' && file->name[2] == '\0')));
+  return file->name[0] == CPATH_STR('.') && (file->name[1] == CPATH_STR('\0') ||
+         (file->name[1] == CPATH_STR('.') && file->name[2] == CPATH_STR('\0')));
 }
 
 _CPATH_FUNC_
@@ -1307,7 +1434,6 @@ int cpathGetFile(cpath_dir *dir, cpath_file *file, size_t n) {
   }
   if (!cpathCheckGetN(dir, n)) return 0;
 
-  cpathGetExtension(&dir->files[n]);
   memcpy(file, &dir->files[n], sizeof(cpath_file));
   return 1;
 }
@@ -1329,7 +1455,6 @@ int cpathGetFileConst(cpath_dir *dir, const cpath_file **file, size_t n) {
     return 0;
   }
 
-  cpathGetExtension(&dir->files[n]);
   *file = &dir->files[n];
   return 1;
 }
@@ -1555,7 +1680,7 @@ cpath_str cpathGetExtension(cpath_file *file) {
     // extension
     file->extension = dot + 1;
   } else {
-    // no extension so set to '\0'
+    // no extension so set to CPATH_STR('\0')
     file->extension = &file->name[cpath_str_length(file->name)];
   }
   return file->extension;
@@ -1848,7 +1973,7 @@ public:
   inline Path() {
     path.len = 1;
     path.buf[0] = CPATH_STR('.');
-    path.buf[1] = '\0';
+    path.buf[1] = CPATH_STR('\0');
   }
 
   inline Path(RawPath path) : path(path) {}

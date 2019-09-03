@@ -121,10 +121,108 @@ int main(int argc, char *argv[]) {
             cpath invalid = cpathFromUtf8("Cat");
             obs_test_false(cpathExists(&invalid));
             CPATH_CONCAT_LIT(&invalid, "../A");
-            obs_test_strcmp(invalid.buf, CPATH_STR("Cat/../A"))
+            obs_test_path_eq_string(invalid, "Cat/../A");
             obs_test_true(cpathCanonicaliseNoSysCall(&invalid, &invalid));
-            obs_test_strcmp(invalid.buf, CPATH_STR("A"))
+            obs_test_path_eq_string(invalid, "A");
             obs_test_true(cpathExists(&invalid));
+        })
+
+        OBS_TEST("cpathUpDir", {
+            cpath dir = cpathFromUtf8("/A/B/C/D");
+            obs_test_true(cpathUpDir(&dir));
+            obs_test_path_eq_string(dir, "/A/B/C");
+            obs_test_true(cpathUpDir(&dir));
+            obs_test_path_eq_string(dir, "/A/B");
+        })
+
+        OBS_TEST("CPath Iterator from 0", {
+            cpath dir = cpathFromUtf8("/A/B/C/D/E.c");
+            const cpath_char_t *it = NULL;
+            int index = 0;
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "");
+            obs_test_strcmp(dir.buf, "");
+            obs_test_strcmp(dir.buf + 1, "A/B/C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "A");
+            obs_test_strcmp(dir.buf, "/A");
+            obs_test_strcmp(dir.buf + 3, "B/C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "B");
+            obs_test_strcmp(dir.buf, "/A/B");
+            obs_test_strcmp(dir.buf + 5, "C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "C");
+            obs_test_strcmp(dir.buf, "/A/B/C");
+            obs_test_strcmp(dir.buf + 7, "D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "D");
+            obs_test_strcmp(dir.buf, "/A/B/C/D");
+            obs_test_strcmp(dir.buf + 9, "E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "E.c");
+            obs_test_strcmp(dir.buf, "/A/B/C/D/E.c");
+            obs_test_strcmp(dir.buf + 13, "");
+            it = cpathItRef(&dir, &index);
+            obs_test_null(it);
+            obs_test_path_eq_string(dir, "/A/B/C/D/E.c");
+        })
+
+        OBS_TEST("CPath Iterator from 0 restoring each time", {
+            cpath dir = cpathFromUtf8("/A/B/C/D/E.c");
+            const cpath_char_t *it = NULL;
+            int index = 0;
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "");
+            obs_test_strcmp(dir.buf, "");
+            obs_test_strcmp(dir.buf + 1, "A/B/C/D/E.c");
+            cpathItRefRestore(&dir, &index);
+            obs_test_strcmp(dir.buf, "/A/B/C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "A");
+            obs_test_strcmp(dir.buf, "/A");
+            obs_test_strcmp(dir.buf + 3, "B/C/D/E.c");
+            cpathItRefRestore(&dir, &index);
+            obs_test_strcmp(dir.buf, "/A/B/C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "B");
+            obs_test_strcmp(dir.buf, "/A/B");
+            obs_test_strcmp(dir.buf + 5, "C/D/E.c");
+            cpathItRefRestore(&dir, &index);
+            obs_test_strcmp(dir.buf, "/A/B/C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "C");
+            obs_test_strcmp(dir.buf, "/A/B/C");
+            obs_test_strcmp(dir.buf + 7, "D/E.c");
+            cpathItRefRestore(&dir, &index);
+            obs_test_strcmp(dir.buf, "/A/B/C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "D");
+            obs_test_strcmp(dir.buf, "/A/B/C/D");
+            obs_test_strcmp(dir.buf + 9, "E.c");
+            cpathItRefRestore(&dir, &index);
+            obs_test_strcmp(dir.buf, "/A/B/C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_not_null(it);
+            obs_test_strcmp(it, "E.c");
+            obs_test_strcmp(dir.buf, "/A/B/C/D/E.c");
+            obs_test_strcmp(dir.buf + 13, "");
+            cpathItRefRestore(&dir, &index);
+            obs_test_strcmp(dir.buf, "/A/B/C/D/E.c");
+            it = cpathItRef(&dir, &index);
+            obs_test_null(it);
+            obs_test_path_eq_string(dir, "/A/B/C/D/E.c");
         })
     })
 
