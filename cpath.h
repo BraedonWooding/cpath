@@ -155,7 +155,6 @@ extern "C" {
 #define cpath_str_length _tcslen
 #define cpath_str_copy _tcscpy
 #define cpath_strn_copy _tcsncpy
-#define cpath_str_concat _tcscat
 #define cpath_str_find_last_char _tcsrchr
 #define cpath_str_compare _tcscmp
 #define cpath_str_compare_safe _tcsncmp
@@ -164,7 +163,6 @@ extern "C" {
 #define cpath_str_length strlen
 #define cpath_str_copy strcpy
 #define cpath_strn_copy strncpy
-#define cpath_str_concat strcat
 #define cpath_str_find_last_char strrchr
 #define cpath_str_compare strcmp
 #define cpath_str_compare_safe strncmp
@@ -251,6 +249,19 @@ extern "C" {
 #define _cpath_readdir readdir
 #define _cpath_closedir closedir
 #endif
+#endif
+
+#if defined CPATH_FORCE_CONVERSION_SYSTEM
+#if defined _MSC_VER || defined __MINGW32__
+#define CPATH_SEP CPATH_STR('\\')
+#define CPATH_OTHER_SEP CPATH_STR('/')
+#else
+#define CPATH_SEP CPATH_STR('/')
+#define CPATH_OTHER_SEP CPATH_STR('\\')
+#endif
+#else
+#define CPATH_SEP CPATH_STR('/')
+#define CPATH_OTHER_SEP CPATH_STR('\\')
 #endif
 
 #if !defined CPATH_NO_CPP_BINDINGS && defined __cplusplus
@@ -356,17 +367,20 @@ typedef void(*cpath_traverse_it)(
   When constructing a path it will always ignore extra / or \ at the end
   and multiple in a row.
 
-  i.e. C://a\b\\c\ is just C:/a\b\c
-
-  If you wish to force a conversion to the crossplatform / then add
-  #define CPATH_FORCE_CONVERSION
-  i.e. C://a\b\\c\ is just C:/a/b/c
+  i.e. C://a\b\\c\ is just C:/a/b/c/
 
   If you wish to force conversion to the system specific one
   (/ on posix \ on windows) then just add
   #define CPATH_FORCE_CONVERSION_SYSTEM
   i.e. on Windows it will be C:\a\b\c on Posix it will be C:/a/b/c
 */
+
+/*
+  Does a strcpy but converts all separators and ignores multiple in a row
+  Returns how many characters were copied.
+*/
+_CPATH_FUNC_
+size_t cpathStrCpyConv(cpath_str dest, size_t len, const cpath_char_t *src);
 
 /*
   Trim all trailing / or \ from a path
@@ -490,6 +504,19 @@ void cpathItRefRestore(cpath *path, int *index);
 */
 _CPATH_FUNC_
 int cpathUpDir(cpath *path);
+
+/*
+  Converts all separators to the given separator
+  Note: will only convert / and \
+*/
+_CPATH_FUNC_
+void cpathConvertSepCustom(cpath *path, cpath_char_t sep);
+
+/*
+  Converts all seperators to the default one.
+*/
+_CPATH_FUNC_
+void cpathConvertSep(cpath *path) { cpathConvertSepCustom(path, CPATH_SEP); }
 
 /* == File System == */
 
@@ -738,13 +765,30 @@ const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep);
 /* == Path == */
 
 _CPATH_FUNC_
+size_t cpathStrCpyConv(cpath_str dest, size_t len, const cpath_char_t *src) {
+  int lastWasSep = 0;
+  cpath_str startDest = dest;
+  for (size_t i = 0; i < len + 1; i++) {
+    int isSep = src[i] == CPATH_OTHER_SEP || src[i] == CPATH_SEP;
+
+    if (isSep && !lastWasSep) {
+      *dest++ = CPATH_SEP;
+    } else if (!isSep || !lastWasSep) {
+      *dest++ = src[i];
+    }
+    lastWasSep = isSep;
+  }
+  return dest - startDest - 1;
+}
+
+_CPATH_FUNC_
 void cpathTrim(cpath *path) {
   /* trim all the terminating / and \ */
   /* We don't want to trim // into empty string
      We will trim it to just /
    */
-  while (path->len > 1 && (path->buf[path->len - 1] == CPATH_STR('/') ||
-         path->buf[path->len - 1] == CPATH_STR('\\'))) {
+  while (path->len > 1 && (path->buf[path->len - 1] == CPATH_SEP ||
+         path->buf[path->len - 1] == CPATH_OTHER_SEP)) {
     path->len--;
   }
   path->buf[path->len] = CPATH_STR('\0');
@@ -771,11 +815,10 @@ cpath cpathFromUtf8(const char *str) {
   }
 #if defined CPATH_UNICODE && defined _MSC_VER
   mbstowcs_s(&path.len, path.buf, len + 1, str, CPATH_MAX_PATH_LEN);
+  cpathConvertSep(&path);
 #else
-  // this is slightly cheaper since it won't keep going till the end of buffer
-  cpath_strn_copy(path.buf, str, len + 1);
+  path.len = cpathStrCpyConv(path.buf, len, str);
 #endif
-  path.len = len;
   cpathTrim(&path);
   return path;
 }
@@ -797,26 +840,29 @@ int cpathFromStr(cpath *out, const cpath_char_t *str) {
     return 1;
   }
 
-  out->len = len;
-  cpath_strn_copy(out->buf, str, len + 1);
+  out->len = cpathStrCpyConv(out->buf, len, str);
+  cpathTrim(out);
   return 1;
 }
 
 _CPATH_FUNC_
-int cpathConcatStrn(cpath *out, const cpath_char_t *other, size_t len) {
+int cpathConcatStrn(cpath *out, const cpath_char_t *str, size_t len) {
   if (len + out->len >= CPATH_MAX_PATH_LEN) {
     // path too long, >= cause max path includes CPATH_STR('\0')
     errno = ENAMETOOLONG;
     return 0;
   }
 
-  if (other[0] != CPATH_STR('/') && out->buf[out->len - 1] != CPATH_STR('/')) {
-    out->buf[out->len++] = CPATH_STR('/');
+  if (str[0] != CPATH_SEP && out->buf[out->len - 1] != CPATH_SEP &&
+      str[0] != CPATH_OTHER_SEP && out->buf[out->len - 1] != CPATH_OTHER_SEP) {
+    out->buf[out->len++] = CPATH_SEP;
     out->buf[out->len] = CPATH_STR('\0');
   }
 
-  cpath_str_concat(out->buf, other);
-  out->len += len;
+  // This is more efficient than a strcat since it doesn't have to get
+  // the length again it also handles all the conversions well and doesn't
+  // have to retraverse the out->buf which we know is fine.
+  out->len += cpathStrCpyConv(out->buf + out->len, len, str);
   cpathTrim(out);
   return 1;
 }
@@ -860,27 +906,28 @@ int cpathCanonicaliseNoSysCall(cpath *out, cpath *path) {
   }
 
   out->len = 0;
-
   cpath_char_t *chr = &path->buf[0];
+
   while (*chr != CPATH_STR('\0')) {
     if (*chr == CPATH_STR('.')) {
       if (chr[1] == CPATH_STR('.')) {
-        if (out->len == 0) {
+        if (out->len == 0 || (out->len == 1 && 
+            (out->buf[0] == CPATH_SEP || out->buf[0] == CPATH_OTHER_SEP))) {
           // no directory to go back based on string alone
           errno = ENOENT;
           return 0;
         }
         // remove last directory ignoring the last / since that is part of ..
         out->len--;
-        while (out->len > 0 && out->buf[out->len - 1] != CPATH_STR('/') &&
-               out->buf[out->len - 1] != CPATH_STR('\\')) {
+        while (out->len > 0 && out->buf[out->len - 1] != CPATH_SEP &&
+               out->buf[out->len - 1] != CPATH_OTHER_SEP) {
           out->len--;
         }
         // skip twice
         chr++;
         chr++;
-      } else if (chr[1] == CPATH_STR('/') || chr[1] == CPATH_STR('\0') ||
-                 chr[1] == CPATH_STR('\\')) {
+      } else if (chr[1] == CPATH_SEP || chr[1] == CPATH_STR('\0') ||
+                 chr[1] == CPATH_OTHER_SEP) {
         // skip
         chr++;
       } else {
@@ -952,14 +999,14 @@ const cpath_char_t *cpathItRef(cpath *path, int *index) {
   }
 
   if (path->buf[*index] == CPATH_STR('\0')) {
-    path->buf[*index] = CPATH_STR('/');
+    path->buf[*index] = CPATH_SEP;
     (*index)++;
   }
   int old_pos = *index;
 
   // find next '/'
-  while (*index < path->len && path->buf[*index] != CPATH_STR('/') &&
-         path->buf[*index] != CPATH_STR('\\')) {
+  while (*index < path->len && path->buf[*index] != CPATH_SEP &&
+         path->buf[*index] != CPATH_OTHER_SEP) {
     (*index)++;
   }
 
@@ -976,13 +1023,13 @@ void cpathItRefRestore(cpath *path, int *index) {
       path->buf[*index] != CPATH_STR('\0')) {
     // we have to loop
     for (int i = 0; i < path->len; i++) {
-      if (path->buf[i] == CPATH_STR('\0')) path->buf[i] = CPATH_STR('/');
+      if (path->buf[i] == CPATH_STR('\0')) path->buf[i] = CPATH_SEP;
     }
     // set index to the length since we have no real way to determine
     // where abouts it its (that is if it isn't null)
     if (index != NULL) *index = path->len;
   } else {
-    path->buf[*index] = CPATH_STR('/');
+    path->buf[*index] = CPATH_SEP;
     (*index)++;
   }
 }
@@ -997,8 +1044,8 @@ int cpathUpDir(cpath *path) {
 
   // We have to find the last component and strip it
   int oldLen = path->len;
-  while (path->len > 1 && path->buf[path->len - 1] != CPATH_STR('/') &&
-         path->buf[path->len - 1] != CPATH_STR('/')) {
+  while (path->len > 1 && path->buf[path->len - 1] != CPATH_SEP &&
+         path->buf[path->len - 1] != CPATH_SEP) {
     path->len--;
   }
   if (path->len == 1) {
@@ -1017,6 +1064,21 @@ int cpathUpDir(cpath *path) {
   path->buf[path->len - 1] = '\0';
   path->len--;
   return 1;
+}
+
+_CPATH_FUNC_
+void cpathConvertSepCustom(cpath *path, cpath_char_t sep) {
+  int lastSep = 0;
+  cpath_str cur = path->buf;
+  for (int i = 0; i < path->len + 1; i++) {
+    int isSep = path->buf[i] == CPATH_SEP || path->buf[i] == CPATH_OTHER_SEP;
+    if (isSep && !lastSep) {
+      *cur++ = CPATH_SEP;
+    } else if (!isSep || !lastSep) {
+      *cur++ = path->buf[i];
+    }
+    lastSep = isSep;
+  }
 }
 
 /* == File System == */

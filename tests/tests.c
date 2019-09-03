@@ -5,22 +5,7 @@
 #define OBS_STRCMP cpath_str_compare
 
 #include "obsidian.h"
-
-#define obs_test_path_eq(a, b) \
-    obs_test_eq(a.len, b.len); \
-    obs_test_strcmp(a.buf, b.buf);
-
-#define obs_test_path_neq(a, b) \
-    obs_test_neq(a.len, b.len); \
-    obs_test_strcmp_false(a.buf, b.buf);
-
-#define obs_test_path_eq_string(a, str) \
-    obs_test_eq(a.len, cpath_str_length(CPATH_STR(str))); \
-    obs_test_strcmp(a.buf, CPATH_STR(str));
-
-#define obs_test_path_neq_string(a, str) \
-    obs_test_neq(a.len, cpath_str_length(CPATH_STR(str))); \
-    obs_test_strcmp_false(a.buf, CPATH_STR(str));
+#include "obsidian_extras.h"
 
 int main(int argc, char *argv[]) {
     OBS_SETUP("CPath")
@@ -42,6 +27,27 @@ int main(int argc, char *argv[]) {
             obs_test_true(cpathFromStr(&raw, CPATH_STR("Cat")));
             obs_test_path_eq_string(raw, "Cat");
             obs_test_path_eq(raw, utf8);
+        })
+
+        OBS_TEST("Convert Backslashes", {
+            cpath utf8 = cpathFromUtf8("/a\\b/c\\\\d/\\");
+            obs_test_path_eq_string(utf8, "/a/b/c/d");
+            cpath path;
+            cpathFromStr(&path, "/a\\b/c\\\\d/\\");
+            obs_test_path_eq_string(path, "/a/b/c/d");
+        })
+
+        OBS_TEST("Convert Backslashes on concat", {
+            cpath utf8 = cpathFromUtf8("/a\\b/c\\\\d/\\");
+            obs_test_path_eq_string(utf8, "/a/b/c/d");
+            obs_test_true(CPATH_CONCAT_LIT(&utf8, "\\e/\\f/g\\"));
+            obs_test_path_eq_string(utf8, "/a/b/c/d/e/f/g");
+            cpath path;
+            cpathFromStr(&path, "/a\\b/c\\\\d/\\");
+            obs_test_path_eq_string(path, "/a/b/c/d");
+            obs_test_path_eq_string(path, "/a/b/c/d");
+            obs_test_true(CPATH_CONCAT_LIT(&path, "\\e/\\f/g\\"));
+            obs_test_path_eq_string(path, "/a/b/c/d/e/f/g");
         })
 
         OBS_TEST("Path copy", {
@@ -81,7 +87,15 @@ int main(int argc, char *argv[]) {
             obs_test_path_eq(copy, copy2);
         })
 
-        // @BUG: `/` should be the user directory
+        OBS_TEST("Fake canonicalise `/`", {
+            cpath a = cpathFromUtf8("/..");
+            obs_test_false(cpathCanonicaliseNoSysCall(&a, &a));
+            a = cpathFromUtf8("/././../");
+            obs_test_false(cpathCanonicaliseNoSysCall(&a, &a));
+            a = cpathFromUtf8("/././");
+            obs_test_true(cpathCanonicaliseNoSysCall(&a, &a));
+            obs_test_path_eq_string(a, "/");
+        })
 
         OBS_TEST("Fake canonicalise `.`", {
             cpath a = cpathFromUtf8("A/./");
