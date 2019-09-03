@@ -65,7 +65,7 @@ extern "C" {
   - You should be able to detect hard failures due to the change in a folder
     and simply just re-call.  Of course this could happen repeatedly but
     come on... In reality it will occur once in a blue moon.
-  - Reloading files is easy it is just `cpathLoadFiles`
+  - Reloading files is easy it is just cpathLoadFiles
 */
 
 /*
@@ -174,8 +174,11 @@ extern "C" {
 #define CPATH_MAX_PATH_LEN MAX_PATH
 #elif defined __linux__ || defined BSD
 
-#ifdef CPATH_MAX
-#define CPATH_MAX_PATH_LEN CPATH_MAX
+// @TODO: Do we add one? for \0
+// I have found conflicting info
+// we definitely don't for windows
+#ifdef PATH_MAX
+#define CPATH_MAX_PATH_LEN PATH_MAX
 #endif
 
 #endif
@@ -335,7 +338,7 @@ enum CPathByteRep_ {
 
   // representations
   BYTE_REP_LONG           = 0b10000000, // Represent as words i.e. kibibytes
-  BYTE_REP_BYTE_WORD      = 0b01000000, // Just `B` as `Byte` (only bytes)
+  BYTE_REP_BYTE_WORD      = 0b01000000, // Just B as Byte (only bytes)
 };
 
 typedef void(*cpath_traverse_it)(
@@ -347,7 +350,103 @@ typedef void(*cpath_traverse_it)(
 
 /* == Path == */
 
+/*
+  A clear path is always just '.'
 
+  When constructing a path it will always ignore extra / or \ at the end
+  and multiple in a row.
+
+  i.e. C://a\b\\c\ is just C:/a\b\c
+
+  If you wish to force a conversion to the crossplatform / then add
+  #define CPATH_FORCE_CONVERSION
+  i.e. C://a\b\\c\ is just C:/a/b/c
+
+  If you wish to force conversion to the system specific one
+  (/ on posix \ on windows) then just add
+  #define CPATH_FORCE_CONVERSION_SYSTEM
+  i.e. on Windows it will be C:\a\b\c on Posix it will be C:/a/b/c
+*/
+
+/*
+  Trim all trailing / or \ from a path
+*/
+_CPATH_FUNC_
+void cpathTrim(cpath *path);
+
+/*
+  Construct a path from a utf8 string
+*/
+_CPATH_FUNC_
+cpath cpathFromUtf8(const char *str);
+
+/*
+  Copy a path
+*/
+_CPATH_FUNC_
+void cpathCopy(cpath *out, const cpath *in);
+
+/*
+  Concatenate a path with a literal
+*/
+#define CPATH_CONCAT_LIT(path, other) cpathConcatStr(path, CPATH_STR(other))
+
+/*
+  Construct a path from a system typed string.
+*/
+_CPATH_FUNC_
+int cpathFromStr(cpath *out, const cpath_char_t *str);
+
+/*
+  Concatenate a path (adds / for you) from a system typed string
+*/
+_CPATH_FUNC_
+int cpathConcatStrn(cpath *out, const cpath_char_t *other, size_t len);
+
+/*
+  Concatenate a path (adds / for you) from a system typed string
+*/
+_CPATH_FUNC_
+int cpathConcatStr(cpath *out, const cpath_char_t *other);
+
+/*
+  Concat a path with another.
+*/
+_CPATH_FUNC_
+int cpathConcat(cpath *out, const cpath *other);
+
+/*
+  Does the path exist.
+*/
+_CPATH_FUNC_
+int cpathExists(const cpath *path);
+
+/*
+  Attempts to canonicalise without system calls
+  Will fail in cases where it can't predict the path
+  i.e. C:/a/../b will be just b
+*/
+_CPATH_FUNC_
+int cpathCanonicaliseNoSysCall(cpath *out, cpath *path);
+
+/*
+  Resolves the path.  Involves system calls.
+*/
+_CPATH_FUNC_
+int cpathCanonicalise(cpath *out, cpath *path);
+
+/*
+  Tries to canonicalise without any system calls
+  then resorts to the system call version if it fails
+*/
+_CPATH_FUNC_
+int cpathCanonicaliseAvoidSysCall(cpath *out, cpath *path);
+
+/*
+  Clears a given path.
+*/
+_CPATH_FUNC_
+void cpathClear(cpath *path);
 
 /* == File System == */
 
@@ -364,10 +463,28 @@ _CPATH_FUNC_
 cpath_char_t *cpathGetCwdBuf(cpath_char_t *buf, size_t size);
 
 /*
+  Write the cwd to a path buffer.
+*/
+_CPATH_FUNC_
+void cpathWriteCwd(cpath *path);
+
+/*
+  Get the cwd as a path.
+*/
+_CPATH_FUNC_
+cpath cpathGetCwd();
+
+/*
   Opens a directory placing information into the given directory buffer.
 */
 _CPATH_FUNC_
 int cpathOpenDir(cpath_dir *dir, const cpath *path);
+
+/*
+  Restarts the given directory iterator.
+*/
+_CPATH_FUNC_
+int cpathRestartDir(cpath_dir *dir);
 
 /*
   Clear directory data.
@@ -377,14 +494,45 @@ _CPATH_FUNC_
 void cpathCloseDir(cpath_dir *dir);
 
 /*
+  Move to the next file in the iterator.
+*/
+_CPATH_FUNC_
+int cpathMoveNextFile(cpath_dir *dir);
+
+/*
+  Load stat.  Sets statLoaded.
+*/
+_CPATH_FUNC_
+int cpathGetFileInfo(cpath_file *file);
+
+/*
+  Load file flags such as isDir, isReg, isSym
+  Attempts to not use stat since that is slow
+*/
+_CPATH_FUNC_
+int cpathLoadFlags(cpath_dir *dir, cpath_file *file, void *data);
+
+/*
+  Peeks the next file but doesn't move the iterator along.
+*/
+_CPATH_FUNC_
+int cpathPeekNextFile(cpath_dir *dir, cpath_file *file);
+
+/*
   Get the next file inside the directory, acts like an iterator.
-  i.e. `while (cpathGetNextFile(...))` can use `dir->hasNext` to verify
+  i.e. while (cpathGetNextFile(...)) can use dir->hasNext to verify
   that there are indeed a file but it is safe!
 
   File may be null if you don't wish to actually get a copy
 */
 _CPATH_FUNC_
 int cpathGetNextFile(cpath_dir *dir, cpath_file *file);
+
+/*
+  Is the file . or ..
+*/
+_CPATH_FUNC_
+int cpathFileIsSpecialHardLink(const cpath_file *file);
 
 /*
   Preload all files in a directory.  Will be called automatically in some
@@ -394,7 +542,14 @@ _CPATH_FUNC_
 int cpathLoadAllFiles(cpath_dir *dir);
 
 /*
-  Get the `nth` file inside the directory, this is independent of the iterator
+  More of a helper function, checks if we have space for n
+  and will preload any files if required.
+*/
+_CPATH_FUNC_
+int cpathCheckGetN(cpath_dir *dir, size_t n);
+
+/*
+  Get the nth file inside the directory, this is independent of the iterator
   above.
 
   Note calling this will require the reading of the entire directory.
@@ -412,11 +567,11 @@ _CPATH_FUNC_
 int cpathGetFileConst(cpath_dir *dir, const cpath_file **file, size_t n);
 
 /*
-  More of a helper function, checks if we have space for `n`
-  and will preload any files if required.
+  Opens the next sub directory into this
+  Saves the old directory into the parent if given saveDir
 */
 _CPATH_FUNC_
-int cpathCheckGetN(cpath_dir *dir, size_t n);
+int cpathOpenSubFileEmplace(cpath_dir *dir, const cpath_file *file,int saveDir);
 
 /*
   Opens the n'th sub directory into this directory
@@ -424,19 +579,6 @@ int cpathCheckGetN(cpath_dir *dir, size_t n);
 */
 _CPATH_FUNC_
 int cpathOpenSubDirEmplace(cpath_dir *dir, size_t n, int saveDir);
-
-/*
-  Restarts a directory to the beginning
-*/
-_CPATH_FUNC_
-int cpathRestartDir(cpath_dir *dir);
-
-/*
-  Opens the next sub directory into this
-  Saves the old directory into the parent if given saveDir
-*/
-_CPATH_FUNC_
-int cpathOpenSubFileEmplace(cpath_dir *dir, const cpath_file *file,int saveDir);
 
 /*
   Opens the n'th sub directory into other given directory
@@ -451,6 +593,12 @@ _CPATH_FUNC_
 int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir);
 
 /*
+  Peeks the sub directory.
+*/
+_CPATH_FUNC_
+int cpathOpenNextSubDir(cpath_dir *out, cpath_dir *dir);
+
+/*
   Opens the next sub directory into this
   Saves the old directory into the parent if given saveDir
 */
@@ -458,15 +606,29 @@ _CPATH_FUNC_
 int cpathOpenNextSubDirEmplace(cpath_dir *dir, int saveDir);
 
 /*
+  Peeks the sub directory
+*/
+_CPATH_FUNC_
+int cpathOpenCurrentSubDirEmplace(cpath_dir *dir, int saveDir);
+
+/*
   Revert an emplace and go back to the parent.
   Note: This can occur multiple times.
   Returns true if it went back to the parent.
+
+  This form is for a pointer variant where the storage
+  of the first directory is external.
 */
 _CPATH_FUNC_
 int cpathRevertEmplace(cpath_dir **dir);
 
 /*
+  Revert an emplace and go back to the parent.
+  Note: This can occur multiple times.
+  Returns true if it went back to the parent.
 
+  This form is for a directory that is stored
+  internally to the function.
 */
 _CPATH_FUNC_
 int cpathRevertEmplaceCopy(cpath_dir *dir);
@@ -494,18 +656,6 @@ _CPATH_FUNC_
 cpath_str cpathGetExtension(cpath_file *file);
 
 /*
-  Standard compare function for files
-*/
-_CPATH_FUNC_
-void cpathSort(cpath_dir *dir, cpath_cmp cmp);
-
-/*
-  Is this file either `.` or `..`
-*/
-_CPATH_FUNC_
-int cpathFileIsSpecialHardLink(const cpath_file *file);
-
-/*
   Get the time of last access
 */
 _CPATH_FUNC_
@@ -518,28 +668,16 @@ _CPATH_FUNC_
 cpath_time_t cpathGetLastModification(cpath_file *file);
 
 /*
-  Get the time of last access as a formatted string
-*/
-_CPATH_FUNC_
-char *cpathGetLastAccessStr(cpath_file *file);
-
-/*
-  Get the time of last modification as a formatted string
-*/
-_CPATH_FUNC_
-char *cpathGetLastModificationStr(cpath_file *file);
-
-/*
   Get the file size in bytes of this file.
 */
 _CPATH_FUNC_
 cpath_offset_t cpathGetFileSize(cpath_file *file);
 
 /*
-  Get the file size prefix
+  Standard compare function for files
 */
 _CPATH_FUNC_
-const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep);
+void cpathSort(cpath_dir *dir, cpath_cmp cmp);
 
 /*
   Get the file size in decimal form
@@ -547,15 +685,18 @@ const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep);
 _CPATH_FUNC_
 double cpathGetFileSizeDec(cpath_file *file, int interval);
 
+/*
+  Get the file size prefix
+*/
 _CPATH_FUNC_
-void cpathWriteCwd(cpath *path);
+const cpath_char_t *cpathGetFileSizeSuffix(cpath_file *file, CPathByteRep rep);
 /* == Definitions == */
 
 /* == Path == */
 
 _CPATH_FUNC_
 void cpathTrim(cpath *path) {
-  // trim all the terminating `/` and `\`
+  /* trim all the terminating / and \ */
   while (path->buf[path->len - 1] == CPATH_STR('/') ||
          path->buf[path->len - 1] == CPATH_STR('\\')) {
     path->buf[path->len - 1] = '\0';
@@ -577,7 +718,7 @@ cpath cpathFromUtf8(const char *str) {
   path.len = 0;
   path.buf[0] = '\0';
   size_t len = cpath_str_length(str);
-  // NOTE: max path len includes the `\0` where as str length doesn't!
+  // NOTE: max path len includes the \0 where as str length doesn't!
   if (len >= CPATH_MAX_PATH_LEN) {
     errno = ENAMETOOLONG;
     return path;
@@ -599,8 +740,6 @@ void cpathCopy(cpath *out, const cpath *in) {
   out->len = in->len;
 }
 
-#define CPATH_CONCAT_LIT(path, other) cpathConcatStr(path, CPATH_STR(other))
-
 _CPATH_FUNC_
 int cpathFromStr(cpath *out, const cpath_char_t *str) {
   size_t len = cpath_str_length(str);
@@ -613,7 +752,7 @@ int cpathFromStr(cpath *out, const cpath_char_t *str) {
   }
 
   out->len = len;
-  cpath_strn_copy(out->buf, str, len);
+  cpath_strn_copy(out->buf, str, len + 1);
   return 1;
 }
 
@@ -663,30 +802,33 @@ int cpathExists(const cpath *path) {
 #endif
 }
 
-// attempts to canonicalise without file system help
 _CPATH_FUNC_
-int cpathCanonicaliseFake(cpath *path) {
+int cpathCanonicaliseNoSysCall(cpath *out, cpath *path) {
+  /*
+    NOTE: This should work even if out == path
+          It just has been written that way.
+  */
   if (path == NULL) {
     errno = EINVAL;
     return 0;
   }
 
-  cpath buf;
-  buf.len = 0;
+  out->len = 0;
+
   cpath_char_t *chr = &path->buf[0];
   while (*chr != '\0') {
     if (*chr == CPATH_STR('.')) {
       if (chr[1] == CPATH_STR('.')) {
-        if (buf.len == 0) {
+        if (out->len == 0) {
           // no directory to go back based on string alone
           errno = ENOENT;
           return 0;
         }
-        // remove last directory ignoring the last `/` since that is part of ..
-        buf.len--;
-        while (buf.len > 0 && buf.buf[buf.len - 1] != CPATH_STR('/') &&
-               buf.buf[buf.len - 1] != CPATH_STR('\\')) {
-          buf.len--;
+        // remove last directory ignoring the last / since that is part of ..
+        out->len--;
+        while (out->len > 0 && out->buf[out->len - 1] != CPATH_STR('/') &&
+               out->buf[out->len - 1] != CPATH_STR('\\')) {
+          out->len--;
         }
         // skip twice
         chr++;
@@ -696,30 +838,65 @@ int cpathCanonicaliseFake(cpath *path) {
         // skip
         chr++;
       } else {
-        buf.buf[buf.len++] = *chr;
+        out->buf[out->len++] = *chr;
       }
     } else {
-      buf.buf[buf.len++] = *chr;
+      out->buf[out->len++] = *chr;
     }
     chr++;
   }
 
-  buf.buf[buf.len] = '\0';
-  cpathCopy(path, &buf);
-  cpathTrim(path);
-  if (path->len == 0) {
-    path->buf[0] = '.';
-    path->buf[1] = '\0';
-    path->len = 1;
+  out->buf[out->len] = '\0';
+  cpathTrim(out);
+  if (out->len == 0) {
+    out->buf[0] = '.';
+    out->buf[1] = '\0';
+    out->len = 1;
   }
 
   return 1;
 }
 
 _CPATH_FUNC_
+int cpathCanonicalise(cpath *out, cpath *path) {
+  cpath tmp;
+  if (out == path) {
+    // support non-restrict method
+    cpathCopy(&tmp, path);
+    path = &tmp;
+  }
+
+#if defined _MSC_VER
+  DWORD size = GetFullPathName(path->buf, CPATH_MAX_PATH_LEN, out->buf, NULL);
+  if (size == 0) {
+    // figure out errno
+    return 0;
+  } else {
+    path->len = size;
+    return 1;
+  }
+#else
+  char *res = realpath(path->buf, out->buf);
+  if (res != NULL) {
+    out->len = cpath_str_length(out->buf);
+  }
+  return res != NULL;
+#endif
+}
+
+_CPATH_FUNC_
+int cpathCanonicaliseAvoidSysCall(cpath *out, cpath *path) {
+  if (!cpathCanonicaliseNoSysCall(out, path)) {
+    return cpathCanonicalise(out, path);
+  }
+  return 1;
+}
+
+_CPATH_FUNC_
 void cpathClear(cpath *path) {
-  path->buf[0] = '\0';
-  path->len = 0;
+  path->buf[0] = '.';
+  path->buf[1] = '\0';
+  path->len = 1;
 }
 
 /* == File System == */
@@ -790,6 +967,7 @@ int cpathOpenDir(cpath_dir *dir, const cpath *path) {
 
 _CPATH_FUNC_
 int cpathRestartDir(cpath_dir *dir) {
+  // @TODO: I think there is a faster way if the handles exist
   if (dir == NULL) {
     errno = EINVAL;
     return 0;
@@ -872,6 +1050,7 @@ void cpathCloseDir(cpath_dir *dir) {
   }
 }
 
+_CPATH_FUNC_
 int cpathMoveNextFile(cpath_dir *dir) {
   if (dir == NULL) {
     errno = EINVAL;
@@ -1020,9 +1199,13 @@ int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
   }
 
   errno = 0;
+  // @TODO: Bug I think
+  //        I think we want to remove the condition that dir->hasNext
+  //        Sicne cpath checks that.
   if (dir->hasNext && !cpathMoveNextFile(dir) && errno != 0) {
     return 0;
   }
+
   return 1;
 }
 

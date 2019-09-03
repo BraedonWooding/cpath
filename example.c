@@ -1,4 +1,4 @@
-#include "path.h"
+#include "cpath.h"
 
 #include <stdio.h>
 
@@ -6,7 +6,7 @@
     Output:
 [D] .
 [D] ..
-[F] path.h
+[F] cpath.h
 [D] a.out.dSYM
 	[D] .
 	[D] ..

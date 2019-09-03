@@ -50,6 +50,12 @@
 #define RESET ""
 #endif
 
+#if defined __GNUC__
+#define OBS_CAST(x, y) ((__typeof__(x))(y))
+#else
+#define OBS_CAST(x, y) (y)
+#endif
+
 #ifndef STRINGIFY
 #define STRINGIFY(x) #x
 #endif
@@ -57,6 +63,8 @@
 #ifndef OBS_STRCMP
 #define OBS_STRCMP strcmp
 #endif
+
+int tests_failed = 0;
 
 #define OBS_SETUP(name) {\
     int successes = 0; \
@@ -144,7 +152,7 @@
         } \
     } while(0);
 
-#define obs_test_binop(x, op, y) obs_test((x op y), obs_get_fmt(x, y), x, (typeof(x))(y));
+#define obs_test_binop(x, op, y) obs_test((x op y), obs_get_fmt(x, y), x, OBS_CAST(x, y));
 #define obs_test_eq(x, y) obs_test_binop(x, ==, y);
 #define obs_test_neq(x, y) obs_test_binop(x, !=, y);
 #define obs_test_lt(x, y) obs_test_binop(x, <, y);
@@ -171,7 +179,7 @@
         } \
         fclose(log); \
     } \
-    return successes != num_tests; \
+    tests_failed = failures; \
 }
 
 #endif /* OBSIDIAN_H */

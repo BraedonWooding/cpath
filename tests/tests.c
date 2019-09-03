@@ -1,6 +1,6 @@
 // This file should be run with -DCPATH_UNICODE on and off
 
-#include "../path.h"
+#include "../cpath.h"
 
 #define OBS_STRCMP cpath_str_compare
 
@@ -85,19 +85,31 @@ int main(int argc, char *argv[]) {
 
         OBS_TEST("Fake canonicalise `.`", {
             cpath a = cpathFromUtf8("A/./");
-            obs_test_true(cpathCanonicaliseFake(&a));
+            obs_test_true(cpathCanonicaliseNoSysCall(&a, &a));
             obs_test_path_eq_string(a, "A");
             a = cpathFromUtf8("././././");
-            obs_test_true(cpathCanonicaliseFake(&a));
+            obs_test_true(cpathCanonicaliseNoSysCall(&a, &a));
             obs_test_path_eq_string(a, ".");
         })
 
         OBS_TEST("Fake canonicalise `..`", {
             cpath a = cpathFromUtf8("A/../");
-            obs_test_true(cpathCanonicaliseFake(&a));
+            obs_test_true(cpathCanonicaliseNoSysCall(&a, &a));
             obs_test_path_eq_string(a, ".");
             cpath b = cpathFromUtf8("./../");
-            obs_test_false(cpathCanonicaliseFake(&b));
+            obs_test_false(cpathCanonicaliseNoSysCall(&b, &b));
+        })
+
+        OBS_TEST("Fake canonicalise complex", {
+            cpath a = cpathFromUtf8("C:/A/../B/../C/../D/./././");
+            obs_test_true(cpathCanonicaliseNoSysCall(&a, &a));
+            obs_test_path_eq_string(a, "C:/D");
+        })
+
+        OBS_TEST("Canonlicalise", {
+            cpath a = cpathFromUtf8(".");
+            obs_test_true(cpathCanonicalise(&a, &a));
+            obs_test_path_eq(a, cpathGetCwd());
         })
 
         OBS_TEST("Paths exist", {
@@ -110,11 +122,12 @@ int main(int argc, char *argv[]) {
             obs_test_false(cpathExists(&invalid));
             CPATH_CONCAT_LIT(&invalid, "../A");
             obs_test_strcmp(invalid.buf, CPATH_STR("Cat/../A"))
-            obs_test_true(cpathCanonicaliseFake(&invalid));
+            obs_test_true(cpathCanonicaliseNoSysCall(&invalid, &invalid));
             obs_test_strcmp(invalid.buf, CPATH_STR("A"))
             obs_test_true(cpathExists(&invalid));
         })
     })
 
     OBS_REPORT
+    return tests_failed;
 }

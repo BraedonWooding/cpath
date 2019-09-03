@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "../../../path.h"
+#include "../../../cpath.h"
 
 void emplace(cpath_dir *dir) {
   cpath_file file;
