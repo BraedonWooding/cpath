@@ -51,5 +51,8 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+build/
+*.cmake
+*.log
 *.tmp
 *.DS_Store

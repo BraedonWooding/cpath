@@ -48,7 +48,7 @@ CPath offers a variety of features such as;
 - The ability to concatenate paths together and compare them in an easy way
   - Paths seem to be fully exempt from the other libraries except as just a 'string'
 - Really efficient 'open file' (that is get information about a file from a path)
-  - Only requires a single system call in most cases
+  - Only requires a single system call!
   - TinyDir has a similar function but it requires opening the parent directory and finding it from the iterator, this is very prone to races and is significantly slower requiring a lot more syscalls
     - Up to O(n) minimum system calls
   - Cute files offers no such feature
@@ -61,10 +61,11 @@ CPath offers a variety of features such as;
   - you can also change the word `bytes` and force it to be always a word or just `B` independent of above.
   - Both tinydir and cute files offers no feature like this
 - In my opinion it also looks much nicer (especially cpp bindings) you can use a single function in a while loop to iterate and its very nice
+- There are some serious benchmarking work going on to make sure that we don't regress to a slower speed over time!
 
 CPath however has a few 'cons';
 
-- It is much larger at around ~2k lines compared to TinyDir's 800 and Cute Files 500
+- It is much larger at around ~2.5k lines compared to TinyDir's 800 and Cute Files 500
   - Cute files is much more bare bones (not a bad thing!) and results in smaller binaries
   - You can disable the CPP bindings in CPath if you want to reduce the footprint by about 600 lines
     - Just `#define NO_CPP_BINDINGS` before include
@@ -95,17 +96,15 @@ CPath however has a few 'cons';
 
 > Memory: 8 GB
 
-This are the results from running the relevant shell files
-
-I also compared against other currently available file systems using their supplied method of traversal or one that would match the closest to what the examples showed.  To try not to give them a disadvantage in speed.
+These were retrieved from the test file.  I sorted them by time and did a small amount of formatting.  I'll always provide a picture with each one for the purposes of comparison :).
 
 > Note: If you feel that I somehow wrote these scripts inefficiently please submit a PR with fixes and I'll run the benchmarks.  Eventually we'll run these benchmarks on multiple machines (eventually) but for now it's easier to just not.
 
 ### Recursive vs Stack through a large directory system
 
-> This test takes a while to run since creating the files can take a while and we are running a 100 tests to get a reasonable average.  Note: I sorted the list after creation.
+> This test takes a while to run since creating the files can take a while and we are running a 100 tests to get a reasonable average.
 
-| Test                     | User   | System | Total  |
+| Test                     | User   | System | Wall   |
 | ------------------------ | ------ | ------ | ------ |
 | CPath (Recursion in C)   | 0.020s | 0.062s | 0.082s |
 | CPath (Emplace in C)     | 0.020s | 0.063s | 0.083s |
