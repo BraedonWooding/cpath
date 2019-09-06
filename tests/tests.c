@@ -213,7 +213,7 @@ int main(int argc, char *argv[]) {
             obs_test_path_eq(copy, copy2);
         })
 
-        OBS_TEST("Fake canonicalise `/`", {
+        OBS_TEST("Fake canonicalise '/'", {
             cpath a = cpathFromUtf8("/..");
             obs_test_false(cpathCanonicaliseNoSysCall(&a, &a));
             a = cpathFromUtf8("/././../");
@@ -223,7 +223,7 @@ int main(int argc, char *argv[]) {
             obs_test_path_eq_string(a, "/");
         })
 
-        OBS_TEST("Fake canonicalise `.`", {
+        OBS_TEST("Fake canonicalise '.'", {
             cpath a = cpathFromUtf8("A/./");
             obs_test_true(cpathCanonicaliseNoSysCall(&a, &a));
             obs_test_path_eq_string(a, "A");
@@ -232,7 +232,7 @@ int main(int argc, char *argv[]) {
             obs_test_path_eq_string(a, ".");
         })
 
-        OBS_TEST("Fake canonicalise `..`", {
+        OBS_TEST("Fake canonicalise '..'", {
             cpath a = cpathFromUtf8("A/../");
             obs_test_true(cpathCanonicaliseNoSysCall(&a, &a));
             obs_test_path_eq_string(a, ".");

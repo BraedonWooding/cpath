@@ -62,7 +62,7 @@
         NOTE: By less output I mean I don't output the constants true, false
               or NULL and often give better assertion outputs
     - At the end you just add OBS_REPORT
-    - You can also override the formats by defining OBSIDIAN_EXTRA_FMT
+    - You can also override the formats by defining OBS_EXTRA_FMT
       where you can define an if else chain (or whatever you want) to convert
       the string representation of the given type to an format output in terms
       of the two arguments from binop and it's children.
@@ -76,8 +76,19 @@
            run and then restoring it after via OBS_RESTORE(stdout, stdout)
       the id is so you can redirect multiple in most cases it'll just match
       the file name like stdout.
-      - If you want to disable all redirections just define OBSIDIAN_NO_REDIRECT
-    - You can remove colour input via the #define OBSIDIAN_NO_COLOURS
+      - If you want to disable all redirections just define OBS_NO_REDIRECT
+    - You can remove colour input via the #define OBS_NO_COLOURS
+    - You can override the raised signal via #define OBS_ERROR_SIGNAL
+      and OBS_ERROR_SIGNAL_NAME
+    - You can disable benchmarking with OBS_NO_BENCHMARKS and
+      OBS_NO_BENCHMARKS_CHILD for just disabling child process benchmarks
+    - You can override the time functions (defaults to using cbench) by
+      OBS_GET_TIME, OBS_GET_WALL_TIME, OBS_GET_CHILDREN_TIME and obsTime
+      - The children time is only required of OBS_NO_BENCHMARKS_CHILD is not
+        defined.
+      - obsTime should be a struct containing 2 doubles userTime and systemTime.
+        spelt exactly that way.  It can contain extra stuff but should aim for
+        just those.
 
     Arguments that obsidian will handle:
     '--benchmarks' or '-b' =>
@@ -86,8 +97,8 @@
     '--tests' or '-t' => Same as benchmarks but for tests
     '--test-groups' or '-g' => Same as tests/benchmarks but for test groups
     '--raise-on-error' or '-e' =>
-        Raise an exception on the first error allowing you to debug the test
-        using a standard debugger.
+        Raise a signal on the first error allowing you to debug the test
+        using a standard debugger.  The signal is #defined.
 
     Debugging Tips:
     - Find all stack frames ('bt')
@@ -104,7 +115,7 @@
 #include <string.h>
 #include <signal.h>
 
-#ifndef OBSIDIAN_NO_COLOURS
+#ifndef OBS_NO_COLOURS
 #define RED   "\x1B[31m"
 #define GRN   "\x1B[32m"
 #define YEL   "\x1B[33m"
@@ -124,13 +135,50 @@
 #define RESET ""
 #endif
 
+#if (defined OBS_ERROR_SIGNAL && !defined OBS_ERROR_SIGNAL_NAME) || \
+    (defined OBS_ERROR_SIGNAL_NAME && !defined OBS_ERROR_SIGNAL)
+#error "Must provide OBS_ERROR_SIGNAL and OBS_ERROR_SIGNAL_NAME"
+#endif
+
+#ifndef OBS_ERROR_SIGNAL
+#define OBS_ERROR_SIGNAL SIGABRT
+#define OBS_ERROR_SIGNAL_NAME "SIGABRT"
+#endif
+
 #ifndef OBS_STRCMP
 #define OBS_STRCMP strcmp
 #endif
 
+#if !defined OBS_NO_BENCHMARKS
+// Note you can provide custom functions as shown below
+#if (defined OBS_GET_TIME && !defined OBS_GET_WALL_TIME) || \
+    (defined OBS_GET_WALL_TIME && !defined OBS_GET_TIME)
+#error "Must provide both OBS_GET_TIME and OBS_GET_WALL_TIME"
+#endif
+
+#if !defined OBS_NO_BENCHMARKS_CHILD
+#if (defined OBS_GET_CHILDREN_TIME && !defined OBS_GET_WALL_TIME) || \
+    (defined OBS_GET_CHILDREN_TIME && !defined OBS_GET_TIME) || \
+    (defined OBS_GET_TIME && !defined OBS_GET_CHILDREN_TIME)
+#error "Must provide OBS_GET_CHILDREN_TIME"
+#endif
+#endif
+
+#if !defined OBS_GET_TIME && !defined OBS_GET_WALL_TIME
+#define OBS_GET_TIME cbenchGetTime
+#define OBS_GET_WALL_TIME cbenchGetWallTime
+#define OBS_GET_CHILDREN_TIME cbenchGetChildrenTime
+#define obsTime struct cbench_time_t
+#else
+#if (!defined obsTime)
+#error "Must also provide the time struct"
+#endif
+#endif
+#endif
+
 #define OBS_MAX_TYPE_SIZE (256)
 
-#ifndef OBSIDIAN_NO_REDIRECT
+#ifndef OBS_NO_REDIRECT
 #if defined _MSC_VER || defined __MINGW32__
 #include <io.h>
 const char *obs_devnull = "NUL";
@@ -189,6 +237,7 @@ bool has_groups = false; \
     int num_benchmarks_filter = 0; \
     int num_group_filter = 0; \
     char *cur_group = ""; \
+    char *cur_test = ""; \
     char *log_file_name = name ".log"; \
     char *err_log_file_name = name "_err.log"; \
     char *benchmarks_log_file_name = name "_benchmark.log"; \
@@ -225,6 +274,7 @@ if (obs_can_run(group_name, group_start, num_group_filter)) { \
     } \
 }
 
+#if !defined OBS_NO_BENCHMARKS
 #define OBS_BENCHMARK_CUSTOM(benchmark_name, repetitions, get_time, wall_time, benchmark...) \
 if (obs_can_run(benchmark_name, benchmark_start, num_benchmarks_filter)) { \
     fprintf(benchmark_log, BLU "Benchmarking" RESET " " benchmark_name " (" #repetitions " time/s) \n"); \
@@ -280,15 +330,28 @@ if (obs_can_run(benchmark_name, benchmark_start, num_benchmarks_filter)) { \
 }
 
 #define OBS_BENCHMARK(benchmark_name, repetitions, benchmark...) \
-    OBS_BENCHMARK_CUSTOM(benchmark_name, repetitions, cbenchGetTime, cbenchGetWallTime, benchmark);
+    OBS_BENCHMARK_CUSTOM(benchmark_name, repetitions, OBS_GET_TIME, \
+                         OBS_GET_WALL_TIME, benchmark);
 
+#ifndef OBS_NO_BENCHMARKS_CHILD
+#define OBS_BENCHMARK_CHILD(benchmark_name, repetitions, benchmark...) \
+    OBS_BENCHMARK_CUSTOM(benchmark_name, repetitions, OBS_GET_CHILDREN_TIME, \
+                         OBS_GET_WALL_TIME, benchmark);
 #define OBS_BENCHMARK_SYS(benchmark_name, repetitions, command) \
-    OBS_BENCHMARK_CUSTOM(benchmark_name, repetitions, cbenchGetChildrenTime, cbenchGetWallTime, {system(command);});
+    OBS_BENCHMARK_CHILD(benchmark_name, repetitions, {system(command);});
+#endif
+#else
+#define OBS_BENCHMARK(...) ;
+#define OBS_BENCHMARK_SYS(...) ;
+#define OBS_BENCHMARK_CHILD(...) ;
+#define OBS_BENCHMARK_CUSTOM(...) ;
+#endif
 
 #define OBS_TEST(name, group...) \
 if (obs_can_run(name, test_start, num_tests_filter)) { \
     num_tests++; \
     success = true; \
+    cur_test = name; \
     group \
     if (success) { \
         successes++; \
@@ -305,10 +368,10 @@ do { \
     num_of_asserts++; \
     if (success && !(cond)) { \
         if (raise_on_err) { \
-            raise(SIGABRT); \
+            raise(OBS_ERROR_SIGNAL); \
         } \
         success = false; \
-        fprintf(err_log, GRN __FILE__":%d" RESET RED " TEST FAILED: " RESET "%s""\n", __LINE__, cur_group); \
+        fprintf(err_log, GRN __FILE__":%d" RESET RED " TEST FAILED: " RESET "%s:%s""\n", __LINE__, cur_group, cur_test); \
         fprintf(err_log, "Assert is " #cond "\n"); \
         fprintf(err_log, fmt, ##args); \
         fprintf(err_log, "\n\n"); \
@@ -339,8 +402,8 @@ static inline const char *obs_get_format(char *type) {
         type++;
     }
 
-#ifdef OBSIDIAN_EXTRA_FMT
-    OBSIDIAN_EXTRA_FMT
+#ifdef OBS_EXTRA_FMT
+    OBS_EXTRA_FMT
 #endif
 
     if (!strcmp(buf, "int") || !strcmp(buf, "signed") || !strcmp(buf, "signed int")) {
@@ -439,17 +502,7 @@ static inline bool obs_parse_args_(FILE *out, int *argc, char ***argv, bool *rai
     bool custom_settings = false;
 
     for (int i = 1; i < *argc; i++) {
-        if (!strcmp((*argv)[i], "--benchmarks") || !strcmp((*argv)[i], "-b")) {
-            if (*benchmark_start != NULL) {
-                fprintf(stderr, "Parse Error: you can't have multiple"
-                                "'--benchmarks'\n");
-                return false;
-            } else {
-                *benchmark_start = *argv + i + 1;
-                last_counter = num_benchmarks;
-                custom_settings = true;
-            }
-        } else if (!strcmp((*argv)[i], "--tests") || !strcmp((*argv)[i], "-t")) {
+        if (!strcmp((*argv)[i], "--tests") || !strcmp((*argv)[i], "-t")) {
             if (*test_start != NULL) {
                 fprintf(stderr, "Parse Error: you can't have multiple"
                                 "'--tests'\n");
@@ -459,7 +512,21 @@ static inline bool obs_parse_args_(FILE *out, int *argc, char ***argv, bool *rai
                 last_counter = num_tests;
                 custom_settings = true;
             }
-        } else if (!strcmp((*argv)[i], "--test-groups") || !strcmp((*argv)[i], "-g")) {
+        }
+#if !defined OBS_NO_BENCHMARKS
+        else if (!strcmp((*argv)[i], "--benchmarks") || !strcmp((*argv)[i], "-b")) {
+            if (*benchmark_start != NULL) {
+                fprintf(stderr, "Parse Error: you can't have multiple"
+                                "'--benchmarks'\n");
+                return false;
+            } else {
+                *benchmark_start = *argv + i + 1;
+                last_counter = num_benchmarks;
+                custom_settings = true;
+            }
+        }
+#endif
+        else if (!strcmp((*argv)[i], "--test-groups") || !strcmp((*argv)[i], "-g")) {
             if (*test_group_start != NULL) {
                 fprintf(stderr, "Parse Error: you can't have multiple"
                                 "'--test-groups'\n");
@@ -501,7 +568,9 @@ static inline bool obs_parse_args_(FILE *out, int *argc, char ***argv, bool *rai
     }
 
     if (*raise_on_err) {
-        fprintf(out, "- Raising signal SIGABRT on error\n");
+        fprintf(out, "- Raising signal ");
+        fprintf(out, OBS_ERROR_SIGNAL_NAME);
+        fprintf(out, "(%d) on error\n", OBS_ERROR_SIGNAL);
     }
 
     if (*test_start != NULL) {
