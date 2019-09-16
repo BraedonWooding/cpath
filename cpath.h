@@ -146,6 +146,7 @@ extern "C" {
 #include <stdio.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <stdint.h>
 
 // Linux has a max of 255 (+1 for \0) I couldn't find a max on windows
 // But since 260 > 256 it is a reasonable value that should be crossplatform
@@ -1445,7 +1446,8 @@ int cpathPeekNextFile(cpath_dir *dir, cpath_file *file) {
         return 0;
     }
     filename = dir->dirent->d_name;
-    filenameLen = dir->dirent->d_namlen;
+    // TODO: On MACOS there is a d_namlen but not on linux
+    filenameLen = strlen(dir->dirent->d_name);
 #endif
     size_t totalLen = dir->path.len + filenameLen;
     if (totalLen + 1 + CPATH_PATH_EXTRA_CHARS >= CPATH_MAX_PATH_LEN ||
