@@ -42,37 +42,50 @@
 //       won't really matter since path
 //       is getting deprecated anyways
 #define obs_test_dot(dir, file)                                                \
-  obs_test_true(cpathGetNextFile(&dir, &file));                                \
-  obs_test_str_eq(file.name, ".");                                             \
-  obs_test_false(file.isReg);                                                  \
-  obs_test_false(file.isSym);                                                  \
-  obs_test_true(file.isDir);                                                   \
+  if (cpath_str_compare(file.name, ".") == 0) {                                \
+    obs_test_str_eq(file.name, ".");                                           \
+    obs_test_false(file.isReg);                                                \
+    obs_test_false(file.isSym);                                                \
+    obs_test_true(file.isDir);                                                 \
+    obs_test_true(cpathGetNextFile(&dir, &file));                              \
+  }                                                                            \
                                                                                \
-  obs_test_true(cpathGetNextFile(&dir, &file));                                \
-  obs_test_str_eq(file.name, "..");                                            \
-  obs_test_false(file.isReg);                                                  \
-  obs_test_false(file.isSym);                                                  \
-  obs_test_true(file.isDir);
+  if (cpath_str_compare(file.name, "..") == 0) {                               \
+    obs_test_str_eq(file.name, "..");                                          \
+    obs_test_false(file.isReg);                                                \
+    obs_test_false(file.isSym);                                                \
+    obs_test_true(file.isDir);                                                 \
+    obs_test_true(cpathGetNextFile(&dir, &file));                              \
+  }                                                                            \
+                                                                               \
+  if (cpath_str_compare(file.name, ".") == 0) {                                \
+    obs_test_str_eq(file.name, ".");                                           \
+    obs_test_false(file.isReg);                                                \
+    obs_test_false(file.isSym);                                                \
+    obs_test_true(file.isDir);                                                 \
+    obs_test_true(cpathGetNextFile(&dir, &file));                              \
+  }
 
 #define obs_test_next_file(dir, file, dir_check, is_dir_code, is_file_code)    \
-  obs_test_dot(dir, file);                                                     \
   obs_test_true(cpathGetNextFile(&dir, &file));                                \
+  obs_test_dot(dir, file);                                                     \
   if (file.isDir) {                                                            \
     dir_check;                                                                 \
     obs_test_true(cpathOpenSubFileEmplace(&dir, &file, 1));                    \
-    obs_test_dot(dir, file);                                                   \
     obs_test_true(cpathGetNextFile(&dir, &file));                              \
+    obs_test_dot(dir, file);                                                   \
     is_dir_code;                                                               \
     obs_test_true(cpathRevertEmplaceCopy(&dir));                               \
     obs_test_true(cpathGetNextFile(&dir, &file));                              \
+    obs_test_dot(dir, file);                                                   \
     is_file_code;                                                              \
   } else {                                                                     \
     is_file_code;                                                              \
     obs_test_true(cpathGetNextFile(&dir, &file));                              \
     dir_check;                                                                 \
     obs_test_true(cpathOpenSubFileEmplace(&dir, &file, 1));                    \
-    obs_test_dot(dir, file);                                                   \
     obs_test_true(cpathGetNextFile(&dir, &file));                              \
+    obs_test_dot(dir, file);                                                   \
     is_dir_code;                                                               \
   }
 
