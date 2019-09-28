@@ -30,8 +30,9 @@
 
 #ifndef CBENCH_H
 
-#if defined _MSC_VER || defined __MINGW32__
-#include <Windows.h>
+#if defined _MSC_VER || defined __MINGW32_
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #else
 #include <unistd.h>
 #include <sys/resource.h>
@@ -39,6 +40,12 @@
 #include <sys/time.h>
 #include <time.h>
 #endif
+
+#define CBENCH_MAJOR_V "1"
+#define CBENCH_MINOR_V "0"
+#define CBENCH_PATCH_V "a"
+
+#define CBENCH_VERSION CBENCH_MAJOR_V "." CBENCH_MINOR_V "." CBENCH_PATCH_V
 
 /*
     Represents a time split into user and system components.
@@ -97,11 +104,10 @@ double cbenchGetWallTime() {
 }
 
 cbenchTime cbenchGetChildrenTime() {
-    // not a valid function on windows
-    // as it doesn't seem we can get children processes
-    // @TODO: Maybe support windows *meh*
+#if defined _MSC_VER && !defined __MINGW32__
 
-#if !defined _MSC_VER && !defined __MINGW32__
+
+#else
     // Note: we don't really use high precision timers because
     //       They often have no way to get System time
     //       and for Cpath's purposes system time is almost more important
