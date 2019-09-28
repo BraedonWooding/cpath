@@ -689,7 +689,7 @@ int cpathGetFileConst(cpath_dir *dir, const cpath_file **file, size_t n);
     Saves the old directory into the parent if given saveDir
 */
 _CPATH_FUNC_
-int cpathOpenSubFileEmplace(cpath_dir *dir, const cpath_file *file,int saveDir);
+int cpathOpenSubFileEmplace(cpath_dir *dir, const cpath_file *file, int saveDir);
 
 /*
     Opens the n'th sub directory into this directory

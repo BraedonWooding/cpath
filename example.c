@@ -99,7 +99,7 @@ void paths_example() {
 
 int main(void) {
     cpath_dir dir;
-    cpath path = cpathGetCwd();
+    cpath path = cpathFromUtf8("tests/A");
     cpathOpenDir(&dir, &path);
     // recursive_visit(&dir, 0);
     paths_example();

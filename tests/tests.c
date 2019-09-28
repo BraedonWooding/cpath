@@ -136,6 +136,20 @@ int main(int argc, char *argv[]) {
   OBS_BENCHMARK_SYS("Python", 100, "python3 ./benchmark_recursive.py ./tmp")
 #endif
 
+  OBS_TEST_GROUP("Visits", {
+    ;
+    OBS_TEST("Emplace no sort", {
+      cpath base = cpathFromUtf8("A");
+      cpath_dir dir;
+      cpathOpenDir(&dir, &base);
+      cpath_file file;
+
+      obs_test_next_file(dir, file, obs_test_match_dir(file, "A/B", "B"),
+                         obs_test_match_file(file, "A/B/b.txt", "b.txt"),
+                         obs_test_match_file(file, "A/a.txt", "a.txt"));
+    })
+  })
+
   OBS_TEST_GROUP("Path", {
     ;
     OBS_TEST("Empty Path", {
