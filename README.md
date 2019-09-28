@@ -1,5 +1,7 @@
 # CPath
 
+![](https://github.com/BraedonWooding/cpath/workflows/CI/badge.svg)
+
 > Made By Braedon Wooding
 
 > Fast (see benchmarks at the bottom), efficient (optimised towards reducing dynamic allocations), and simple
