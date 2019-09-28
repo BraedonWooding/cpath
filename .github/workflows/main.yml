@@ -1,0 +1,18 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-16.04, macOS-10.14, macOS-latest]
+        test_file: [tests.c, tests_force_conv.c]
+        test_unicode: ["", -DCPATH_UNICODE]
+    
+    steps:
+    - uses: actions/checkout@v1
+    - name: Run Tests
+      run: cd tests && gcc ${{ matrix.test_file }} -o tests ${{ matrix.test_unicode }} && ./tests
