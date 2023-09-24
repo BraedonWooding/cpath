@@ -1478,10 +1478,8 @@ int cpathPeekNextFile(cpath_dir *dir, cpath_file *file) {
 
 _CPATH_FUNC_
 int cpathGetNextFile(cpath_dir *dir, cpath_file *file) {
-    if (file != NULL) {
-        if (!cpathPeekNextFile(dir, file)) {
-            return 0;
-        }
+    if (!cpathPeekNextFile(dir, file)) {
+        return 0;
     }
 
     errno = 0;
